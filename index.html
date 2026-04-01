@@ -559,8 +559,10 @@
 const DEFAULT_SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbxy8l3VTyfcMuVJ4luF39fYnldW61Er_CRIBvRi0__n-yRAFid9CjYocX8IqQ02zI4c/exec';
 const DEFAULT_ADMIN_EMAIL = 'cinthiavelez@cookunity.com';
 
-const USER_KEY = 'cx_tracker_user_v1';
-const CFG_KEY  = 'cx_tracker_cfg_v1';
+const USER_KEY       = 'cx_tracker_user_v1';
+const CFG_KEY        = 'cx_tracker_cfg_v1';
+const DATA_CACHE_KEY = 'cx_tracker_data_v2';   // bump version to bust old caches
+const DATA_CACHE_TTL = 3 * 60 * 1000;          // show cached data for up to 3 min
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let cachedData        = [];   // all review records
@@ -614,10 +616,68 @@ function logout() {
 async function initApp() {
   populateDropdowns();
   updateRoleUI();
-  const data = await apiFetch();
-  updateRoleUI();
-  renderDashboard();
-  setInterval(async () => { await apiFetch(); renderPage(currentPage); }, 120000);
+
+  // ── Fast path: paint from localStorage cache immediately ─────────────────────
+  const hasCached = loadDataCache();
+  if (hasCached) {
+    updateRoleUI();
+    renderDashboard();
+    // Refresh silently in background — no spinner, no blocking
+    apiFetchSilent().then(() => renderPage(currentPage));
+  } else {
+    // First ever load — show spinner normally
+    await apiFetch();
+    updateRoleUI();
+    renderDashboard();
+  }
+
+  // Background poll every 2 minutes
+  setInterval(() => apiFetchSilent().then(() => renderPage(currentPage)), 120000);
+}
+
+// ── Cache helpers ─────────────────────────────────────────────────────────────
+function loadDataCache() {
+  try {
+    const raw = localStorage.getItem(DATA_CACHE_KEY);
+    if (!raw) return false;
+    const cached = JSON.parse(raw);
+    if (!cached || !cached.cachedAt) return false;
+    if (Date.now() - cached.cachedAt > DATA_CACHE_TTL) return false; // stale
+    applyData(cached);
+    return true;
+  } catch (e) { return false; }
+}
+
+function saveDataCache(data) {
+  try { localStorage.setItem(DATA_CACHE_KEY, JSON.stringify({ ...data, cachedAt: Date.now() })); } catch (e) {}
+}
+
+function applyData(data) {
+  cachedData        = data.records    || [];
+  cachedLeaderboard = data.leaderboard || [];
+  cachedMyStats     = data.myStats    || {};
+  if (data.config) { cachedConfig = { ...cachedConfig, ...data.config }; populateDropdowns(); }
+  if (data.role)   { cachedRole   = data.role; }
+}
+
+// Silent background fetch — no spinner, no toast on success
+async function apiFetchSilent() {
+  setSyncStatus('syncing');
+  try {
+    const u   = getUser();
+    const url = u ? `${scriptUrl()}?email=${encodeURIComponent(u.email)}` : scriptUrl();
+    const res = await fetch(url, { redirect: 'follow' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    applyData(data);
+    saveDataCache(data);
+    updateRoleUI();
+    setSyncStatus('ok');
+  } catch (err) {
+    console.warn('Background refresh failed:', err.message);
+    setSyncStatus('err');
+  }
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -631,13 +691,9 @@ async function apiFetch() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-
-    cachedData        = data.records   || [];
-    cachedLeaderboard = data.leaderboard || [];
-    cachedMyStats     = data.myStats   || {};
-    if (data.config) { cachedConfig = { ...cachedConfig, ...data.config }; populateDropdowns(); }
-    if (data.role)   { cachedRole   = data.role; updateRoleUI(); }
-
+    applyData(data);
+    saveDataCache(data);
+    updateRoleUI();
     setSyncStatus('ok');
   } catch (err) {
     console.error(err);
@@ -886,7 +942,7 @@ function renderReviews() {
       <td class="ai-notes-cell" title="${escHtml(r.aiNotes||'')}">${escHtml(r.aiNotes||'—')}</td>
       <td>${r.finalStatus === 'Valid' ? `<strong style="color:#10B981">$${r.bonusRate||0}</strong>` : '—'}</td>
       ${isAdm ? `<td style="font-size:.8rem;color:#64748B">${escHtml(r.agentName||r.agentEmail||'—')}</td>` : ''}
-      ${isAdm ? `<td style="font-size:.75rem;color:${r.duplicateFlag?'#7C3AED':'#94A3B8'};max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(r.duplicateFlag||'')}">${r.duplicateFlag ? '🚩 ' + escHtml(r.duplicateFlag.split(':')[0]) : '—'}</td>` : ''}
+      ${isAdm ? `<td style="font-size:.75rem;color:${r.duplicateFlag?'#7C3AED':'#94A3B8'};max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(r.duplicateFlag||'')}">${r.duplicateFlag ? '🚩 ' + escHtml(safeStr(r.duplicateFlag).split(':')[0]) : '—'}</td>` : ''}
       <td>
         <div class="inline-actions">
           ${r.reviewUrl ? `<a href="${escHtml(r.reviewUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View live review">🔗</a>` : ''}
@@ -1266,7 +1322,7 @@ async function loadReviewQueue() {
     }
 
     list.innerHTML = queue.map(r => {
-      const flagReason = (r.duplicateFlag || '').split(':')[0] || 'DUPLICATE';
+      const flagReason = safeStr(r.duplicateFlag).split(':')[0] || 'DUPLICATE';
       const flagLabel  = flagReason.replace(/_/g, ' ');
       // Find potential conflict in cachedData
       const conflict   = findConflictRecord(r);
@@ -1330,13 +1386,13 @@ function reviewDetailRows(r) {
 }
 
 function findConflictRecord(flaggedRecord) {
-  const reason    = (flaggedRecord.duplicateFlag || '').split(':')[0] || '';
+  const reason    = safeStr(flaggedRecord.duplicateFlag).split(':')[0] || '';
   const allActive = cachedData.filter(r => r.id !== flaggedRecord.id && r.finalStatus !== 'Pending Review');
 
   if (reason === 'DUPLICATE_TICKET_PLATFORM') {
     return allActive.find(r =>
-      String(r.ticketId || '').trim().toLowerCase() === String(flaggedRecord.ticketId || '').trim().toLowerCase() &&
-      String(r.platform || '').trim().toLowerCase() === String(flaggedRecord.platform || '').trim().toLowerCase()
+      safeStr(r.ticketId).trim().toLowerCase() === safeStr(flaggedRecord.ticketId).trim().toLowerCase() &&
+      safeStr(r.platform).trim().toLowerCase() === safeStr(flaggedRecord.platform).trim().toLowerCase()
     ) || null;
   }
   if (reason === 'DUPLICATE_SCREENSHOT') {
@@ -1344,13 +1400,13 @@ function findConflictRecord(flaggedRecord) {
     return allActive.find(r => fid && extractDriveFileIdFE(r.screenshotDriveUrl || '') === fid) || null;
   }
   if (reason === 'DUPLICATE_REVIEW_URL') {
-    const url = String(flaggedRecord.reviewUrl || '').trim().toLowerCase();
-    return allActive.find(r => url && String(r.reviewUrl || '').trim().toLowerCase() === url) || null;
+    const url = safeStr(flaggedRecord.reviewUrl).trim().toLowerCase();
+    return allActive.find(r => url && safeStr(r.reviewUrl).trim().toLowerCase() === url) || null;
   }
   if (reason === 'SAME_CUSTOMER_PLATFORM_MONTH') {
     return allActive.find(r =>
-      String(r.customerName || '').trim().toLowerCase() === String(flaggedRecord.customerName || '').trim().toLowerCase() &&
-      String(r.platform     || '').trim().toLowerCase() === String(flaggedRecord.platform     || '').trim().toLowerCase() &&
+      safeStr(r.customerName).trim().toLowerCase() === safeStr(flaggedRecord.customerName).trim().toLowerCase() &&
+      safeStr(r.platform).trim().toLowerCase()     === safeStr(flaggedRecord.platform).trim().toLowerCase() &&
       (r.month        || '') === (flaggedRecord.month || '') &&
       (r.agentEmail   || '').toLowerCase() !== (flaggedRecord.agentEmail || '').toLowerCase()
     ) || null;
@@ -1523,8 +1579,12 @@ function currentMonthStr() {
   return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`;
 }
 
+// safeStr — converts ANY value from Google Sheets (number, boolean, Date, null)
+// to a plain string before calling .trim() / .toLowerCase() / .split() etc.
+function safeStr(v) { return String(v == null ? '' : v); }
+
 function escHtml(s) {
-  return String(s||'')
+  return safeStr(s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
