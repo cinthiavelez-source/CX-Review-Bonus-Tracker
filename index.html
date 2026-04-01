@@ -1335,8 +1335,8 @@ function findConflictRecord(flaggedRecord) {
 
   if (reason === 'DUPLICATE_TICKET_PLATFORM') {
     return allActive.find(r =>
-      (r.ticketId || '').trim().toLowerCase() === (flaggedRecord.ticketId || '').trim().toLowerCase() &&
-      (r.platform || '').trim().toLowerCase() === (flaggedRecord.platform || '').trim().toLowerCase()
+      String(r.ticketId || '').trim().toLowerCase() === String(flaggedRecord.ticketId || '').trim().toLowerCase() &&
+      String(r.platform || '').trim().toLowerCase() === String(flaggedRecord.platform || '').trim().toLowerCase()
     ) || null;
   }
   if (reason === 'DUPLICATE_SCREENSHOT') {
@@ -1344,13 +1344,13 @@ function findConflictRecord(flaggedRecord) {
     return allActive.find(r => fid && extractDriveFileIdFE(r.screenshotDriveUrl || '') === fid) || null;
   }
   if (reason === 'DUPLICATE_REVIEW_URL') {
-    const url = (flaggedRecord.reviewUrl || '').trim().toLowerCase();
-    return allActive.find(r => url && (r.reviewUrl || '').trim().toLowerCase() === url) || null;
+    const url = String(flaggedRecord.reviewUrl || '').trim().toLowerCase();
+    return allActive.find(r => url && String(r.reviewUrl || '').trim().toLowerCase() === url) || null;
   }
   if (reason === 'SAME_CUSTOMER_PLATFORM_MONTH') {
     return allActive.find(r =>
-      (r.customerName || '').trim().toLowerCase() === (flaggedRecord.customerName || '').trim().toLowerCase() &&
-      (r.platform     || '').trim().toLowerCase() === (flaggedRecord.platform     || '').trim().toLowerCase() &&
+      String(r.customerName || '').trim().toLowerCase() === String(flaggedRecord.customerName || '').trim().toLowerCase() &&
+      String(r.platform     || '').trim().toLowerCase() === String(flaggedRecord.platform     || '').trim().toLowerCase() &&
       (r.month        || '') === (flaggedRecord.month || '') &&
       (r.agentEmail   || '').toLowerCase() !== (flaggedRecord.agentEmail || '').toLowerCase()
     ) || null;
