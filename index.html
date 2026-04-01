@@ -1533,8 +1533,8 @@ function updateRoleUI() {
   const isAdm = isCurrentUserAdmin();
   const adminBtn  = document.getElementById('btn-admin');
   const payoutBtn = document.querySelector('.nav-btn[data-page="payout"]');
-  if (adminBtn)  adminBtn.style.display  = isAdm ? '' : 'none';
-  if (payoutBtn) payoutBtn.style.display = isAdm ? '' : 'none';
+  if (adminBtn)  adminBtn.style.display  = isAdm ? 'inline-flex' : 'none';
+  if (payoutBtn) payoutBtn.style.display = isAdm ? 'inline-flex' : 'none';
 
   // Show a notification dot on Admin button if there are submissions pending supervisor review
   if (isAdm && adminBtn) {
