@@ -403,8 +403,30 @@
 
   <!-- ── PAYOUT REPORT ── -->
   <div class="page" id="page-payout">
-    <div class="page-title"><span>💰</span> Monthly Payout Report</div>
+    <div class="page-title"><span>💰</span> Payout Report</div>
+
+    <!-- MoM summary banners -->
+    <div class="stats-grid" id="payout-summary-grid" style="display:none">
+      <div class="stat-card amber">
+        <div class="stat-label">Outstanding (Unpaid)</div>
+        <div class="stat-value" id="payout-outstanding">$0</div>
+        <div class="stat-sub" id="payout-outstanding-sub">across all months</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-label">Paid This Year</div>
+        <div class="stat-value" id="payout-paid-ytd">$0</div>
+        <div class="stat-sub" id="payout-paid-ytd-sub">confirmed payments</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Generated</div>
+        <div class="stat-value" id="payout-total-ytd">$0</div>
+        <div class="stat-sub">all months combined</div>
+      </div>
+    </div>
+
+    <!-- Generate a month's report -->
     <div class="card">
+      <div class="card-title">📅 Generate Monthly Report</div>
       <div class="month-selector">
         <label>Month:</label>
         <input type="month" id="payout-month" />
@@ -424,14 +446,36 @@
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>#</th><th>Agent</th><th>Valid Reviews</th><th>Tier</th><th>Rate/Review</th><th>Total Bonus</th>
+            <th>#</th><th>Agent</th><th>Valid Reviews</th><th>Tier</th><th>Rate/Review</th><th>Total Bonus</th><th>Payment Status</th><th>Action</th>
           </tr></thead>
           <tbody id="payout-body"></tbody>
         </table>
       </div>
-      <div id="payout-empty" class="empty-state" style="display:none">
+      <div id="payout-empty" class="empty-state">
         <div class="icon">💰</div>
         <p>Select a month and click "Generate Report" to calculate payouts.</p>
+      </div>
+    </div>
+
+    <!-- Payment History — Month over Month -->
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between">
+        <span>📊 Payment History — Month over Month</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportPayoutsCSV()">⬇️ Export CSV</button>
+      </div>
+      <div id="mom-empty" class="empty-state">
+        <div class="icon">📊</div>
+        <p>No payout history yet. Generate a report first.</p>
+      </div>
+      <div id="mom-table-wrap" style="display:none">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Month</th><th>Agent</th><th>Valid Reviews</th><th>Tier</th><th>Total Bonus</th><th>Payment Status</th><th>Paid Date</th><th>Paid By</th>
+            </tr></thead>
+            <tbody id="mom-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -956,12 +1000,15 @@ function renderLeaderboard() {
 }
 
 // ── PAYOUT REPORT ─────────────────────────────────────────────────────────────
+let cachedAllPayouts = []; // MoM history cache
+
 function renderPayoutEmpty() {
   const monthInput = document.getElementById('payout-month');
   if (!monthInput.value) monthInput.value = currentMonthStr();
   document.getElementById('payout-empty').style.display = '';
   document.getElementById('payout-total-banner').style.display = 'none';
   document.getElementById('payout-body').innerHTML = '';
+  loadAllPayoutHistory(); // always refresh MoM history when page opens
 }
 
 async function generatePayout() {
@@ -971,6 +1018,7 @@ async function generatePayout() {
     const data = await apiPost({ action: 'generatePayout', month });
     renderPayoutTable(data.payouts, data.grandTotal, month);
     showToast(`✅ Payout report generated for ${formatMonthLabel(month)}`, '#10B981');
+    loadAllPayoutHistory(); // refresh MoM after generating
   } catch (err) {
     showToast('Error: ' + err.message, '#EF4444');
   } finally {
@@ -991,14 +1039,7 @@ async function loadPayoutData() {
       showToast('No saved payout data for this month. Click Generate Report.', '#F59E0B');
       return;
     }
-    const rows = data.payouts.map(p => ({
-      agentEmail: p.agentEmail,
-      agentName:  p.agentName,
-      count:      p.validReviewCount,
-      tier:       p.bonusTier,
-      rate:       p.ratePerReview,
-      total:      p.totalBonus
-    }));
+    const rows = normalizePayoutRows(data.payouts);
     const grandTotal = rows.reduce((s, r) => s + Number(r.total), 0);
     renderPayoutTable(rows, grandTotal, month);
   } catch (err) {
@@ -1008,8 +1049,25 @@ async function loadPayoutData() {
   }
 }
 
+// Normalizes payout rows from either backend format (raw sheet) or generated format
+function normalizePayoutRows(rows) {
+  return rows.map(p => ({
+    agentEmail: p.agentEmail  || '',
+    agentName:  p.agentName   || p.agentEmail || '',
+    count:      p.validReviewCount ?? p.count ?? 0,
+    tier:       p.bonusTier   || p.tier  || '',
+    rate:       p.ratePerReview ?? p.rate ?? 0,
+    total:      p.totalBonus  ?? p.total ?? 0,
+    paidStatus: p.paidStatus  || 'Unpaid',
+    paidDate:   p.paidDate    || '',
+    paidBy:     p.paidBy      || ''
+  }));
+}
+
 function renderPayoutTable(rows, grandTotal, month) {
-  if (!rows?.length) {
+  const normalized = normalizePayoutRows(rows);
+
+  if (!normalized.length) {
     document.getElementById('payout-empty').style.display = '';
     document.getElementById('payout-total-banner').style.display = 'none';
     document.getElementById('payout-body').innerHTML = '';
@@ -1017,24 +1075,170 @@ function renderPayoutTable(rows, grandTotal, month) {
     return;
   }
 
-  document.getElementById('payout-empty').style.display       = 'none';
+  document.getElementById('payout-empty').style.display        = 'none';
   document.getElementById('payout-total-banner').style.display = '';
   document.getElementById('payout-grand-total').textContent    = `$${grandTotal}`;
   document.getElementById('payout-month-label').textContent    = formatMonthLabel(month);
-  document.getElementById('payout-agent-count').textContent    = `${rows.length} agent${rows.length !== 1 ? 's' : ''}`;
+  document.getElementById('payout-agent-count').textContent    = `${normalized.length} agent${normalized.length !== 1 ? 's' : ''}`;
 
-  document.getElementById('payout-body').innerHTML = rows.map((p, i) => `
-    <tr>
+  document.getElementById('payout-body').innerHTML = normalized.map((p, i) => {
+    const isPaid   = p.paidStatus === 'Paid';
+    const badgeCss = isPaid
+      ? 'background:#D1FAE5;color:#065F46'
+      : 'background:#FEF3C7;color:#92400E';
+    return `
+    <tr style="${isPaid ? 'opacity:.75' : ''}">
       <td>${i + 1}</td>
       <td>
-        <div style="font-weight:600">${escHtml(p.agentName || p.agentEmail)}</div>
+        <div style="font-weight:600">${escHtml(p.agentName)}</div>
         <div style="font-size:.75rem;color:#94A3B8">${escHtml(p.agentEmail)}</div>
       </td>
       <td><strong>${p.count}</strong></td>
       <td><span class="badge" style="background:#EEF2FF;color:#4F46E5">${escHtml(p.tier)}</span></td>
       <td>$${p.rate}/review</td>
       <td><strong style="color:#10B981;font-size:1.05rem">$${p.total}</strong></td>
-    </tr>`).join('');
+      <td><span class="badge" style="${badgeCss}">${isPaid ? '✅ Paid' : '⏳ Unpaid'}</span>
+          ${isPaid && p.paidDate ? `<div style="font-size:.7rem;color:#94A3B8;margin-top:.2rem">${formatDate(p.paidDate)}</div>` : ''}
+      </td>
+      <td>
+        <button class="btn btn-sm ${isPaid ? 'btn-secondary' : 'btn-primary'}"
+          onclick="togglePaid('${escHtml(month)}','${escHtml(p.agentEmail)}','${isPaid ? 'Unpaid' : 'Paid'}')">
+          ${isPaid ? '↩ Undo' : '✅ Mark Paid'}
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// Toggle payment status for a single agent in the current month view
+async function togglePaid(month, agentEmail, newStatus) {
+  showLoading(true, newStatus === 'Paid' ? 'Marking as paid…' : 'Reverting payment…');
+  try {
+    await apiPost({ action: 'markAsPaid', entries: [{ month, agentEmail }], paidStatus: newStatus });
+    showToast(newStatus === 'Paid' ? `✅ Marked as paid.` : '↩ Reverted to Unpaid.', newStatus === 'Paid' ? '#10B981' : '#F59E0B');
+    loadPayoutData();       // refresh the single-month table
+    loadAllPayoutHistory(); // refresh MoM table
+  } catch (err) {
+    showToast('Error: ' + err.message, '#EF4444');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// ── MoM PAYMENT HISTORY ───────────────────────────────────────────────────────
+async function loadAllPayoutHistory() {
+  try {
+    const u   = getUser();
+    const url = `${scriptUrl()}?action=getAllPayouts&email=${encodeURIComponent(u?.email||'')}`;
+    const res = await fetch(url, { redirect: 'follow' });
+    const data = await res.json();
+    if (data.error || !data.payouts) return;
+
+    cachedAllPayouts = normalizePayoutRows(data.payouts);
+    renderMoMTable(cachedAllPayouts);
+    renderPayoutSummary(cachedAllPayouts);
+  } catch (err) {
+    console.error('MoM load error:', err);
+  }
+}
+
+function renderMoMTable(rows) {
+  const wrap  = document.getElementById('mom-table-wrap');
+  const empty = document.getElementById('mom-empty');
+
+  if (!rows.length) {
+    wrap.style.display  = 'none';
+    empty.style.display = '';
+    return;
+  }
+
+  wrap.style.display  = '';
+  empty.style.display = 'none';
+
+  // Sort by month descending (newest first)
+  const sorted = [...rows].sort((a, b) => {
+    const ma = (a.month || ''); const mb = (b.month || '');
+    return mb.localeCompare(ma);
+  });
+
+  document.getElementById('mom-body').innerHTML = sorted.map(p => {
+    const isPaid   = p.paidStatus === 'Paid';
+    const badgeCss = isPaid ? 'background:#D1FAE5;color:#065F46' : 'background:#FEF3C7;color:#92400E';
+    return `
+    <tr style="${isPaid ? 'opacity:.8' : ''}">
+      <td><strong>${escHtml(p.month || '—')}</strong></td>
+      <td>
+        <div style="font-weight:600">${escHtml(p.agentName)}</div>
+        <div style="font-size:.75rem;color:#94A3B8">${escHtml(p.agentEmail)}</div>
+      </td>
+      <td>${p.count}</td>
+      <td><span class="badge" style="background:#EEF2FF;color:#4F46E5;font-size:.72rem">${escHtml(p.tier)}</span></td>
+      <td><strong style="color:#10B981">$${p.total}</strong></td>
+      <td><span class="badge" style="${badgeCss}">${isPaid ? '✅ Paid' : '⏳ Unpaid'}</span></td>
+      <td style="font-size:.8rem;color:#64748B">${p.paidDate ? formatDate(p.paidDate) : '—'}</td>
+      <td style="font-size:.8rem;color:#94A3B8">${escHtml(p.paidBy || '—')}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderPayoutSummary(rows) {
+  const grid = document.getElementById('payout-summary-grid');
+  if (!rows.length) { grid.style.display = 'none'; return; }
+  grid.style.display = '';
+
+  const year        = new Date().getFullYear().toString();
+  const outstanding = rows.filter(r => r.paidStatus !== 'Paid').reduce((s, r) => s + Number(r.total), 0);
+  const paidYTD     = rows.filter(r => r.paidStatus === 'Paid' && (r.month||'').startsWith(year)).reduce((s, r) => s + Number(r.total), 0);
+  const totalAll    = rows.reduce((s, r) => s + Number(r.total), 0);
+
+  const unpaidCount = rows.filter(r => r.paidStatus !== 'Paid').length;
+  const paidCount   = rows.filter(r => r.paidStatus === 'Paid' && (r.month||'').startsWith(year)).length;
+
+  document.getElementById('payout-outstanding').textContent     = `$${outstanding}`;
+  document.getElementById('payout-outstanding-sub').textContent = `${unpaidCount} unpaid entr${unpaidCount !== 1 ? 'ies' : 'y'}`;
+  document.getElementById('payout-paid-ytd').textContent        = `$${paidYTD}`;
+  document.getElementById('payout-paid-ytd-sub').textContent    = `${paidCount} payment${paidCount !== 1 ? 's' : ''} confirmed`;
+  document.getElementById('payout-total-ytd').textContent       = `$${totalAll}`;
+}
+
+// ── CSV EXPORT ────────────────────────────────────────────────────────────────
+// Generates a full MoM CSV file and triggers a browser download.
+// Columns: Month, Agent Name, Agent Email, Valid Reviews, Tier, Rate/Review, Total Bonus, Payment Status, Paid Date, Paid By
+function exportPayoutsCSV() {
+  const rows = cachedAllPayouts;
+  if (!rows.length) {
+    showToast('No payout history to export. Generate a report first.', '#F59E0B');
+    return;
+  }
+
+  const headers = ['Month','Agent Name','Agent Email','Valid Reviews','Tier','Rate Per Review','Total Bonus','Payment Status','Paid Date','Paid By'];
+  const csvRows = [headers.join(',')];
+
+  const sorted = [...rows].sort((a, b) => (a.month||'').localeCompare(b.month||''));
+  for (const r of sorted) {
+    csvRows.push([
+      r.month       || '',
+      `"${(r.agentName  || '').replace(/"/g,'""')}"`,
+      r.agentEmail  || '',
+      r.count       || 0,
+      `"${(r.tier || '').replace(/"/g,'""')}"`,
+      r.rate        || 0,
+      r.total       || 0,
+      r.paidStatus  || 'Unpaid',
+      r.paidDate    ? formatDate(r.paidDate) : '',
+      r.paidBy      || ''
+    ].join(','));
+  }
+
+  const csv     = csvRows.join('\n');
+  const blob    = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url     = URL.createObjectURL(blob);
+  const link    = document.createElement('a');
+  link.href     = url;
+  link.download = `CX-Bonus-Payouts-${new Date().toISOString().split('T')[0]}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  showToast('📥 CSV downloaded!', '#4F46E5');
 }
 
 // ── SUPERVISOR REVIEW QUEUE ───────────────────────────────────────────────────
