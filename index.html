@@ -323,6 +323,16 @@
             <input type="url" id="f-reviewUrl" placeholder="https://..." />
             <span class="hint">Link to the live review (if available)</span>
           </div>
+          <div class="form-group">
+            <label>Review Date *</label>
+            <input type="date" id="f-reviewDate" required />
+            <span class="hint">The date the customer posted this review</span>
+          </div>
+          <div class="form-group">
+            <label>Registration Date</label>
+            <input type="date" id="f-registrationDate" readonly style="background:#F1F5F9;color:#64748B;cursor:not-allowed" />
+            <span class="hint">Auto-filled: the date you are submitting this review</span>
+          </div>
           <div class="form-group full">
             <label>Screenshot *</label>
             <div id="screenshot-dropzone" onclick="document.getElementById('f-screenshot').click()"
@@ -380,7 +390,9 @@
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>Date</th>
+            <th>Code</th>
+            <th>Reg. Date</th>
+            <th>Review Date</th>
             <th>Ticket</th>
             <th>Platform</th>
             <th>Customer</th>
@@ -621,6 +633,9 @@ function logout() {
 async function initApp() {
   populateDropdowns();
   updateRoleUI();
+  // Pre-fill registration date (today) — read-only field auto-stamped on load
+  const regField = document.getElementById('f-registrationDate');
+  if (regField) regField.value = new Date().toISOString().split('T')[0];
 
   // ── Fast path: paint from localStorage cache immediately ─────────────────────
   const hasCached = loadDataCache();
@@ -918,6 +933,8 @@ async function submitReview(e) {
     platform,
     customerName:        document.getElementById('f-customerName').value.trim(),
     reviewUrl:           document.getElementById('f-reviewUrl').value.trim(),
+    reviewDate:          document.getElementById('f-reviewDate').value,
+    registrationDate:    document.getElementById('f-registrationDate').value,
     screenshotBase64:    base64,
     screenshotMimeType:  file.type,
     screenshotFileName:  file.name,
@@ -955,6 +972,11 @@ function clearSubmitForm() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  // Reset date fields; re-stamp registration date to today
+  const rd = document.getElementById('f-reviewDate');
+  if (rd) rd.value = '';
+  const reg = document.getElementById('f-registrationDate');
+  if (reg) reg.value = new Date().toISOString().split('T')[0];
   // Reset file picker, stored reference, and preview
   selectedScreenshotFile = null;
   const fi = document.getElementById('f-screenshot');
@@ -995,13 +1017,15 @@ function renderReviews() {
 
   const tbody = document.getElementById('reviews-body');
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
     return;
   }
 
   tbody.innerHTML = rows.map(r => `
     <tr>
-      <td>${formatDate(r.submittedAt)}</td>
+      <td><code style="font-size:.78rem;background:#EEF2FF;color:#4F46E5;padding:.2rem .4rem;border-radius:.3rem;font-weight:600">${escHtml(r.reviewCode||'—')}</code></td>
+      <td style="font-size:.8rem;color:#64748B">${r.registrationDate ? formatDate(r.registrationDate) : formatDate(r.submittedAt)}</td>
+      <td style="font-size:.8rem;color:#64748B">${r.reviewDate ? formatDate(r.reviewDate) : '—'}</td>
       <td><code style="font-size:.8rem;background:#F1F5F9;padding:.2rem .4rem;border-radius:.3rem">${escHtml(r.ticketId||'—')}</code></td>
       <td>${escHtml(r.platform||'—')}</td>
       <td>${escHtml(r.customerName||'—')}</td>
@@ -1013,6 +1037,7 @@ function renderReviews() {
       <td>
         <div class="inline-actions">
           ${r.reviewUrl ? `<a href="${escHtml(r.reviewUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View live review">🔗</a>` : ''}
+          ${r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View screenshot">📸</a>` : ''}
           ${isAdm ? `
             <button class="btn btn-secondary btn-icon" title="Re-run AI validation" onclick="revalidate('${r.id}','${escHtml(r.screenshotDriveUrl||'')}','${escHtml(r.platform||'')}')">🔄</button>
             <button class="btn btn-secondary btn-icon" title="Manual override" onclick="openOverrideModal('${r.id}')">⚙️</button>
