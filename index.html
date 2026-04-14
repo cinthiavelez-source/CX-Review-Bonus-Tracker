@@ -869,8 +869,12 @@ function previewScreenshot(input) {
     hint.textContent = '⚠️ File is over 8 MB — please compress it before uploading.';
     hint.style.display = '';
     input.value = '';
+    selectedScreenshotFile = null;
     return;
   }
+  // Store file reference in a module-level variable — more reliable than
+  // re-reading input.files[0] at submit time (some browsers clear hidden inputs)
+  selectedScreenshotFile = file;
   hint.style.display = 'none';
   const preview = document.getElementById('screenshot-preview');
   const placeholder = document.getElementById('screenshot-placeholder');
@@ -886,8 +890,7 @@ async function submitReview(e) {
   const u   = getUser();
   const btn = document.getElementById('btn-submit');
 
-  const fileInput = document.getElementById('f-screenshot');
-  const file = fileInput.files[0];
+  const file = selectedScreenshotFile;
 
   if (!file) {
     showToast('Please upload a screenshot of the review.', '#EF4444');
@@ -952,7 +955,8 @@ function clearSubmitForm() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  // Reset file picker and preview
+  // Reset file picker, stored reference, and preview
+  selectedScreenshotFile = null;
   const fi = document.getElementById('f-screenshot');
   if (fi) fi.value = '';
   const preview = document.getElementById('screenshot-preview');
@@ -1119,7 +1123,8 @@ function renderLeaderboard() {
 }
 
 // ── PAYOUT REPORT ─────────────────────────────────────────────────────────────
-let cachedAllPayouts = []; // MoM history cache
+let cachedAllPayouts      = []; // MoM history cache
+let selectedScreenshotFile = null; // holds the File object chosen in the upload dropzone
 
 function renderPayoutEmpty() {
   const monthInput = document.getElementById('payout-month');
