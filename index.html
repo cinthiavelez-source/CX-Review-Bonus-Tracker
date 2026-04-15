@@ -210,6 +210,7 @@
     <button class="nav-btn" data-page="reviews" onclick="navTo('reviews')">My Reviews</button>
     <button class="nav-btn" data-page="leaderboard" onclick="navTo('leaderboard')">Leaderboard</button>
     <button class="nav-btn" data-page="payout" onclick="navTo('payout')">💰 Payouts</button>
+    <button class="nav-btn" data-page="allreviews" onclick="navTo('allreviews')" id="btn-allreviews" style="display:none">📊 All Reviews</button>
     <button class="nav-btn" data-page="admin" onclick="navTo('admin')" id="btn-admin" style="display:none">⚙️ Admin</button>
   </div>
   <div class="nav-right">
@@ -409,6 +410,50 @@
     </div>
   </div>
 
+  <!-- ── ALL REVIEWS ── -->
+  <div class="page" id="page-allreviews">
+    <div class="page-title"><span>📊</span> All Reviews</div>
+    <div class="card">
+      <div class="filters">
+        <span class="filter-label">Filter:</span>
+        <select id="ar-filter-supervisor" onchange="renderAllReviews()" style="display:none">
+          <option value="">All Supervisors</option>
+        </select>
+        <select id="ar-filter-platform" onchange="renderAllReviews()">
+          <option value="">All Platforms</option>
+        </select>
+        <select id="ar-filter-status" onchange="renderAllReviews()">
+          <option value="">All Statuses</option>
+          <option value="Valid">Valid ✅</option>
+          <option value="Invalid">Invalid ❌</option>
+          <option value="Pending">Pending ⏳</option>
+          <option value="Pending Review">👀 Pending Review</option>
+        </select>
+        <input type="month" id="ar-filter-month" onchange="renderAllReviews()" />
+        <button class="btn btn-secondary btn-sm" onclick="clearAllReviewsFilters()">Clear</button>
+        <span id="ar-count" style="margin-left:auto;font-size:.82rem;color:#64748B"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Code</th>
+            <th>Reg. Date</th>
+            <th>Review Date</th>
+            <th>Platform</th>
+            <th>Customer</th>
+            <th>Agent</th>
+            <th>Supervisor</th>
+            <th>Status</th>
+            <th>Flag</th>
+            <th>Bonus</th>
+            <th>Actions</th>
+          </tr></thead>
+          <tbody id="allreviews-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- ── LEADERBOARD ── -->
   <div class="page" id="page-leaderboard">
     <div class="page-title"><span>🏆</span> Team Leaderboard</div>
@@ -538,6 +583,45 @@
         </div>
       </div>
     </div><!-- /roles card -->
+
+    <!-- SUPERVISOR MAPPINGS -->
+    <div class="card" id="supervisor-mappings-card">
+      <div class="admin-section">
+        <div class="admin-section-title">👥 Supervisor Assignments</div>
+        <p style="font-size:.82rem;color:#94A3B8;margin-bottom:.75rem">
+          Manage which supervisor each agent is assigned to. When a review is flagged, it's automatically assigned to and emailed to the agent's supervisor.
+        </p>
+        <div style="margin-bottom:.75rem">
+          <input type="text" id="sup-search" placeholder="Search by agent or supervisor name…" oninput="renderSupervisorMappings()" style="width:100%;max-width:360px;padding:.5rem .75rem;border:1px solid #E2E8F0;border-radius:.5rem;font-size:.85rem" />
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Supervisor</th><th>Supervisor Email</th><th>Agent</th><th>Agent Email</th><th></th></tr></thead>
+            <tbody id="sup-mappings-body"></tbody>
+          </table>
+        </div>
+        <div class="add-role-row" style="margin-top:1rem;display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:.5rem;align-items:end">
+          <div>
+            <label style="font-size:.75rem;color:#64748B;font-weight:600">Supervisor Name</label>
+            <input type="text" id="new-sup-name" placeholder="Full name" style="width:100%;padding:.4rem .6rem;border:1px solid #E2E8F0;border-radius:.4rem;font-size:.83rem;margin-top:.2rem" />
+          </div>
+          <div>
+            <label style="font-size:.75rem;color:#64748B;font-weight:600">Supervisor Email</label>
+            <input type="email" id="new-sup-email" placeholder="sup@cookunity.com" style="width:100%;padding:.4rem .6rem;border:1px solid #E2E8F0;border-radius:.4rem;font-size:.83rem;margin-top:.2rem" />
+          </div>
+          <div>
+            <label style="font-size:.75rem;color:#64748B;font-weight:600">Agent Name</label>
+            <input type="text" id="new-agent-name" placeholder="Full name" style="width:100%;padding:.4rem .6rem;border:1px solid #E2E8F0;border-radius:.4rem;font-size:.83rem;margin-top:.2rem" />
+          </div>
+          <div>
+            <label style="font-size:.75rem;color:#64748B;font-weight:600">Agent Email</label>
+            <input type="email" id="new-agent-email" placeholder="agent@cookunity.com" style="width:100%;padding:.4rem .6rem;border:1px solid #E2E8F0;border-radius:.4rem;font-size:.83rem;margin-top:.2rem" />
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="addSupervisorMapping()" style="height:34px;margin-top:auto">Add</button>
+        </div>
+      </div>
+    </div><!-- /supervisor mappings card -->
+
   </div><!-- /page-admin -->
 
 </div><!-- /main -->
@@ -582,12 +666,13 @@ const DATA_CACHE_KEY = 'cx_tracker_data_v2';   // bump version to bust old cache
 const DATA_CACHE_TTL = 3 * 60 * 1000;          // show cached data for up to 3 min
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
-let cachedData        = [];   // all review records
-let cachedConfig      = { platforms: ['Google Reviews','Yelp','Trustpilot','App Store','Google Play'] };
-let cachedRole        = 'agent';
-let cachedLeaderboard = [];
-let cachedMyStats     = {};
-let currentPage       = 'dashboard';
+let cachedData              = [];   // all review records
+let cachedConfig            = { platforms: ['Google Reviews','Yelp','Trustpilot','App Store','Google Play'] };
+let cachedRole              = 'agent';
+let cachedLeaderboard       = [];
+let cachedMyStats           = {};
+let cachedSupervisorMappings = [];
+let currentPage             = 'dashboard';
 let platformChart     = null;
 let statusChart       = null;
 
@@ -673,11 +758,12 @@ function saveDataCache(data) {
 }
 
 function applyData(data) {
-  cachedData        = data.records    || [];
-  cachedLeaderboard = data.leaderboard || [];
-  cachedMyStats     = data.myStats    || {};
-  if (data.config) { cachedConfig = { ...cachedConfig, ...data.config }; populateDropdowns(); }
-  if (data.role)   { cachedRole   = data.role; }
+  cachedData              = data.records    || [];
+  cachedLeaderboard       = data.leaderboard || [];
+  cachedMyStats           = data.myStats    || {};
+  if (data.config)              { cachedConfig = { ...cachedConfig, ...data.config }; populateDropdowns(); }
+  if (data.role)                { cachedRole              = data.role; }
+  if (data.supervisorMappings)  { cachedSupervisorMappings = data.supervisorMappings; }
 }
 
 // Silent background fetch — no spinner, no toast on success
@@ -739,7 +825,7 @@ async function apiPost(body) {
 }
 
 // ── NAVIGATION ────────────────────────────────────────────────────────────────
-const PAGES = ['dashboard','submit','reviews','leaderboard','payout','admin'];
+const PAGES = ['dashboard','submit','reviews','leaderboard','payout','allreviews','admin'];
 
 function navTo(page) {
   currentPage = page;
@@ -758,7 +844,8 @@ function renderPage(page) {
   if (page === 'reviews')     renderReviews();
   if (page === 'leaderboard') renderLeaderboard();
   if (page === 'payout')      renderPayoutEmpty();
-  if (page === 'admin')       { loadReviewQueue(); loadAdminRoles(); }
+  if (page === 'admin')       { loadReviewQueue(); loadAdminRoles(); loadSupervisorMappings(); }
+  if (page === 'allreviews')  renderAllReviews();
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
@@ -1109,6 +1196,103 @@ function clearFilters() {
     if (el) el.value = '';
   });
   renderReviews();
+}
+
+// ── ALL REVIEWS TABLE (admin + supervisor) ────────────────────────────────────
+function renderAllReviews() {
+  const isAdm = isCurrentUserAdmin();
+  const isSup = isCurrentUserSupervisor();
+  const u     = getUser();
+
+  // Populate supervisor filter (admin only)
+  const supFilter = document.getElementById('ar-filter-supervisor');
+  if (supFilter) {
+    supFilter.style.display = isAdm ? '' : 'none';
+    if (isAdm && supFilter.options.length <= 1) {
+      const supervisors = [...new Set(cachedSupervisorMappings.map(m => m.supervisorName).filter(Boolean))].sort();
+      supervisors.forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        supFilter.appendChild(opt);
+      });
+    }
+  }
+
+  // Populate platform filter
+  const platFilter = document.getElementById('ar-filter-platform');
+  if (platFilter && platFilter.options.length <= 1) {
+    const platforms = [...new Set(cachedData.map(r => r.platform).filter(Boolean))].sort();
+    platforms.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p; opt.textContent = p;
+      platFilter.appendChild(opt);
+    });
+  }
+
+  const supVal  = document.getElementById('ar-filter-supervisor')?.value || '';
+  const platVal = document.getElementById('ar-filter-platform')?.value   || '';
+  const statVal = document.getElementById('ar-filter-status')?.value     || '';
+  const monthVal= document.getElementById('ar-filter-month')?.value      || '';
+
+  let rows = [...cachedData].sort((a,b) => new Date(b.submittedAt||0) - new Date(a.submittedAt||0));
+
+  if (supVal)   rows = rows.filter(r => safeStr(r.supervisorName) === supVal);
+  if (platVal)  rows = rows.filter(r => r.platform === platVal);
+  if (statVal)  rows = rows.filter(r => r.finalStatus === statVal);
+  if (monthVal) rows = rows.filter(r => (r.month || '').substring(0,7) === monthVal);
+
+  const countEl = document.getElementById('ar-count');
+  if (countEl) countEl.textContent = `${rows.length} review${rows.length !== 1 ? 's' : ''}`;
+
+  const tbody = document.getElementById('allreviews-body');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td><code style="font-size:.78rem;background:#EEF2FF;color:#4F46E5;padding:.2rem .4rem;border-radius:.3rem;font-weight:600">${escHtml(r.reviewCode||'—')}</code></td>
+      <td style="font-size:.8rem;color:#64748B">${r.registrationDate ? formatDate(r.registrationDate) : formatDate(r.submittedAt)}</td>
+      <td style="font-size:.8rem;color:#64748B">${r.reviewDate ? formatDate(r.reviewDate) : '—'}</td>
+      <td>${escHtml(r.platform||'—')}</td>
+      <td>${escHtml(r.customerName||'—')}</td>
+      <td style="font-size:.82rem">
+        <div style="font-weight:600;color:#1E1B4B">${escHtml(r.agentName||'—')}</div>
+        <div style="color:#94A3B8;font-size:.75rem">${escHtml(r.agentEmail||'')}</div>
+      </td>
+      <td style="font-size:.82rem">
+        <div style="font-weight:600;color:#0F766E">${escHtml(r.supervisorName||'—')}</div>
+        <div style="color:#94A3B8;font-size:.75rem">${escHtml(r.supervisorEmail||'')}</div>
+      </td>
+      <td>${statusBadge(r.finalStatus)}</td>
+      <td style="font-size:.75rem;color:${r.duplicateFlag?'#7C3AED':'#94A3B8'};max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(r.duplicateFlag||'')}">${r.duplicateFlag ? '🚩 ' + escHtml(safeStr(r.duplicateFlag).split(':')[0]) : '—'}</td>
+      <td>${r.finalStatus === 'Valid' ? `<strong style="color:#10B981">$${r.bonusRate||0}</strong>` : '—'}</td>
+      <td>
+        <div class="inline-actions">
+          ${r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View screenshot">📸</a>` : ''}
+          ${r.finalStatus === 'Pending Review' ? `
+            <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','approve')">✅ Approve</button>
+            <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','reject')">❌ Reject</button>
+          ` : ''}
+          ${isAdm ? `
+            <button class="btn btn-secondary btn-icon" title="Manual override" onclick="openOverrideModal('${r.id}')">⚙️</button>
+            <button class="btn btn-danger btn-icon" title="Delete" onclick="deleteReview('${r.id}')">🗑️</button>
+          ` : ''}
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+function clearAllReviewsFilters() {
+  ['ar-filter-supervisor','ar-filter-platform','ar-filter-status'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const m = document.getElementById('ar-filter-month');
+  if (m) m.value = '';
+  renderAllReviews();
 }
 
 // ── LEADERBOARD ───────────────────────────────────────────────────────────────
@@ -1595,6 +1779,76 @@ async function removeRole(email) {
   }
 }
 
+// ── SUPERVISOR MAPPINGS (Admin) ───────────────────────────────────────────────
+function loadSupervisorMappings() {
+  renderSupervisorMappings();
+}
+
+function renderSupervisorMappings() {
+  const search = (document.getElementById('sup-search')?.value || '').toLowerCase().trim();
+  let mappings = cachedSupervisorMappings;
+  if (search) {
+    mappings = mappings.filter(m =>
+      safeStr(m.supervisorName).toLowerCase().includes(search) ||
+      safeStr(m.supervisorEmail).toLowerCase().includes(search) ||
+      safeStr(m.agentName).toLowerCase().includes(search) ||
+      safeStr(m.agentEmail).toLowerCase().includes(search)
+    );
+  }
+  const tbody = document.getElementById('sup-mappings-body');
+  if (!tbody) return;
+  if (!mappings.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#94A3B8;padding:1rem">No mappings found.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = mappings.map(m => `
+    <tr>
+      <td style="font-weight:600;font-size:.83rem">${escHtml(m.supervisorName||'—')}</td>
+      <td style="font-size:.8rem;color:#64748B">${escHtml(m.supervisorEmail||'—')}</td>
+      <td style="font-size:.83rem">${escHtml(m.agentName||'—')}</td>
+      <td style="font-size:.8rem;color:#64748B">${escHtml(m.agentEmail||'—')}</td>
+      <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteSupervisorMapping('${escHtml(m.agentEmail||'')}','${escHtml(m.agentName||'')}')">🗑️</button></td>
+    </tr>`).join('');
+}
+
+async function addSupervisorMapping() {
+  const supName   = document.getElementById('new-sup-name')?.value.trim();
+  const supEmail  = document.getElementById('new-sup-email')?.value.trim().toLowerCase();
+  const agentName = document.getElementById('new-agent-name')?.value.trim();
+  const agentEmail= document.getElementById('new-agent-email')?.value.trim().toLowerCase();
+  if (!supName || !supEmail || !agentName || !agentEmail) {
+    showToast('Please fill in all four fields.', '#EF4444'); return;
+  }
+  showLoading(true, 'Saving mapping…');
+  try {
+    await apiPost({ action: 'saveSupervisorMapping', supervisorName: supName, supervisorEmail: supEmail, agentName, agentEmail });
+    // Update local cache
+    const existing = cachedSupervisorMappings.findIndex(m => safeStr(m.agentEmail).toLowerCase() === agentEmail);
+    const entry = { supervisorName: supName, supervisorEmail: supEmail, agentName, agentEmail };
+    if (existing >= 0) cachedSupervisorMappings[existing] = entry;
+    else cachedSupervisorMappings.push(entry);
+    // Clear inputs
+    ['new-sup-name','new-sup-email','new-agent-name','new-agent-email'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+    renderSupervisorMappings();
+    showToast('✅ Mapping saved.', '#10B981');
+  } catch(err) {
+    showToast('Error: ' + err.message, '#EF4444');
+  } finally { showLoading(false); }
+}
+
+async function deleteSupervisorMapping(agentEmail, agentName) {
+  if (!confirm(`Remove supervisor assignment for ${agentName || agentEmail}?`)) return;
+  showLoading(true, 'Removing mapping…');
+  try {
+    await apiPost({ action: 'deleteSupervisorMapping', agentEmail });
+    cachedSupervisorMappings = cachedSupervisorMappings.filter(m => safeStr(m.agentEmail).toLowerCase() !== agentEmail.toLowerCase());
+    renderSupervisorMappings();
+    showToast('✅ Mapping removed.', '#10B981');
+  } catch(err) {
+    showToast('Error: ' + err.message, '#EF4444');
+  } finally { showLoading(false); }
+}
+
 // ── DROPDOWNS ─────────────────────────────────────────────────────────────────
 function populateDropdowns() {
   const platforms = cachedConfig.platforms || [];
@@ -1622,14 +1876,20 @@ function isCurrentUserAdmin() {
   return cachedRole === 'admin' || (u && u.email.toLowerCase() === DEFAULT_ADMIN_EMAIL.toLowerCase());
 }
 
+function isCurrentUserSupervisor() { return cachedRole === 'supervisor'; }
+
 function updateRoleUI() {
   const isAdm = isCurrentUserAdmin();
-  const adminBtn  = document.getElementById('btn-admin');
-  const payoutBtn = document.querySelector('.nav-btn[data-page="payout"]');
-  if (adminBtn)  adminBtn.style.display  = isAdm ? 'inline-flex' : 'none';
-  if (payoutBtn) payoutBtn.style.display = isAdm ? 'inline-flex' : 'none';
+  const isSup = isCurrentUserSupervisor();
+  const adminBtn      = document.getElementById('btn-admin');
+  const payoutBtn     = document.querySelector('.nav-btn[data-page="payout"]');
+  const allReviewsBtn = document.getElementById('btn-allreviews');
 
-  // Show a notification dot on Admin button if there are submissions pending supervisor review
+  if (adminBtn)      adminBtn.style.display      = isAdm ? 'inline-flex' : 'none';
+  if (payoutBtn)     payoutBtn.style.display     = isAdm ? 'inline-flex' : 'none';
+  if (allReviewsBtn) allReviewsBtn.style.display = (isAdm || isSup) ? 'inline-flex' : 'none';
+
+  // Notification dot on Admin button for pending supervisor reviews
   if (isAdm && adminBtn) {
     const pendingCount = cachedData.filter(r => r.finalStatus === 'Pending Review').length;
     const existing = adminBtn.querySelector('.admin-notif');
@@ -1637,6 +1897,18 @@ function updateRoleUI() {
     if (pendingCount > 0) {
       adminBtn.insertAdjacentHTML('beforeend',
         `<span class="admin-notif" style="background:#EF4444;color:white;border-radius:9999px;font-size:.68rem;font-weight:700;padding:.1rem .45rem;margin-left:.35rem;vertical-align:middle">${pendingCount}</span>`
+      );
+    }
+  }
+
+  // Notification dot on All Reviews button for supervisors with pending items
+  if (isSup && allReviewsBtn) {
+    const pendingCount = cachedData.filter(r => r.finalStatus === 'Pending Review').length;
+    const existing = allReviewsBtn.querySelector('.sup-notif');
+    if (existing) existing.remove();
+    if (pendingCount > 0) {
+      allReviewsBtn.insertAdjacentHTML('beforeend',
+        `<span class="sup-notif" style="background:#EF4444;color:white;border-radius:9999px;font-size:.68rem;font-weight:700;padding:.1rem .45rem;margin-left:.35rem;vertical-align:middle">${pendingCount}</span>`
       );
     }
   }
