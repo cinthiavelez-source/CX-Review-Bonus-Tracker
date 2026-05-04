@@ -19,7 +19,7 @@
     .nav-links { display: flex; gap: .25rem; }
     .nav-btn { background: rgba(255,255,255,.12); border: none; color: rgba(255,255,255,.85); padding: .45rem .9rem; border-radius: .5rem; cursor: pointer; font-size: .85rem; font-weight: 500; transition: all .15s; }
     .nav-btn:hover, .nav-btn.active { background: rgba(255,255,255,.25); color: white; }
-    .nav-btn[data-page="payout"] { display: none; }
+    /* payout tab is visible to all roles — visibility controlled by updateRoleUI() */
     .nav-right { display: flex; align-items: center; gap: .75rem; }
     .nav-user { color: rgba(255,255,255,.8); font-size: .82rem; }
     .nav-logout { background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3); color: white; padding: .35rem .8rem; border-radius: .4rem; cursor: pointer; font-size: .8rem; }
@@ -159,6 +159,12 @@
     #toast { position: fixed; bottom: 2rem; right: 2rem; color: white; padding: .85rem 1.4rem; border-radius: .75rem; font-weight: 600; font-size: .88rem; transform: translateY(120px); opacity: 0; transition: all .3s cubic-bezier(.34,1.56,.64,1); z-index: 10000; max-width: 340px; }
     #toast.show { transform: translateY(0); opacity: 1; }
 
+    /* ── SESSION TIMEOUT BANNER ── */
+    #session-warn-banner { display:none; position:fixed; top:58px; left:0; right:0; z-index:200; background:#FEF3C7; border-bottom:2px solid #F59E0B; padding:.6rem 1.25rem; display:none; align-items:center; justify-content:center; gap:.75rem; font-size:.88rem; font-weight:600; color:#78350F; }
+    #session-warn-banner .swb-countdown { font-size:1rem; font-weight:800; color:#B45309; font-variant-numeric:tabular-nums; }
+    #session-warn-banner .swb-btn { background:#F59E0B; color:white; border:none; border-radius:.45rem; padding:.35rem .9rem; cursor:pointer; font-size:.82rem; font-weight:700; }
+    #session-warn-banner .swb-btn:hover { background:#D97706; }
+
     /* ── MISC ── */
     .page-title { font-size: 1.5rem; font-weight: 800; color: #1E293B; margin-bottom: 1.5rem; display: flex; align-items: center; gap: .6rem; }
     .page-title span { font-size: 1.6rem; }
@@ -244,7 +250,7 @@
     <button class="nav-btn" data-page="reviews" onclick="navTo('reviews')">My Reviews</button>
     <button class="nav-btn" data-page="leaderboard" onclick="navTo('leaderboard')">Leaderboard</button>
     <button class="nav-btn" data-page="payout" onclick="navTo('payout')">💰 Payouts</button>
-    <button class="nav-btn" data-page="allreviews" onclick="navTo('allreviews')" id="btn-allreviews" style="display:none">📊 All Reviews</button>
+    <button class="nav-btn" data-page="allreviews" onclick="navTo('allreviews')" id="btn-allreviews">📊 All Reviews</button>
     <button class="nav-btn" data-page="admin" onclick="navTo('admin')" id="btn-admin" style="display:none">⚙️ Admin</button>
   </div>
   <div class="nav-right">
@@ -253,6 +259,12 @@
     <button class="nav-logout" onclick="logout()">Sign Out</button>
   </div>
 </nav>
+
+<!-- Session Timeout Warning Banner -->
+<div id="session-warn-banner" role="alert">
+  ⏱️ Your session will expire in <span class="swb-countdown" id="session-countdown">5:00</span> due to inactivity.
+  <button class="swb-btn" onclick="resetSessionTimer()">Stay signed in</button>
+</div>
 
 <!-- MAIN CONTENT -->
 <div class="main" id="main-content" style="display:none">
@@ -325,16 +337,11 @@
       </div>
     </div>
 
-    <!-- Recent submissions -->
-    <div class="card">
-      <div class="card-title">📋 Recent Submissions</div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Date</th><th>Platform</th><th>Customer</th><th>Ticket</th><th>Status</th><th>Bonus</th>
-          </tr></thead>
-          <tbody id="dash-recent-body"></tbody>
-        </table>
+    <!-- Specialist Ranking Card -->
+    <div class="card" id="dash-ranking-card">
+      <div class="card-title">🏅 Your Ranking — <span id="dash-rank-month-label" style="color:#4F46E5"></span></div>
+      <div id="dash-ranking-body">
+        <div class="empty-state"><div class="icon">🏅</div><p>No data yet for this month.</p></div>
       </div>
     </div>
   </div>
@@ -550,10 +557,10 @@
       <div class="card-title">📅 Generate Monthly Report</div>
       <div class="month-selector" style="flex-wrap:wrap;gap:.5rem">
         <label>Month:</label>
-        <input type="month" id="payout-month" />
-        <button class="btn btn-primary btn-sm" onclick="generatePayout()">Generate Report</button>
-        <button class="btn btn-secondary btn-sm" onclick="loadPayoutData()">Load Saved</button>
-        <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
+        <input type="month" id="payout-month" onchange="renderPayoutEmpty()" />
+        <button id="payout-generate-btn" class="btn btn-primary btn-sm" onclick="generatePayout()">Generate Report</button>
+        <button id="payout-load-saved-btn" class="btn btn-secondary btn-sm" onclick="loadPayoutData()">Load Saved</button>
+        <div id="payout-agent-filter-wrap" style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
           <label style="font-size:.83rem;color:#64748B;white-space:nowrap">Filter agent:</label>
           <input type="text" id="payout-filter-agent" placeholder="Type name…" oninput="filterPayoutTable()" style="padding:.35rem .6rem;border:1px solid #E2E8F0;border-radius:.4rem;font-size:.83rem;width:160px" />
         </div>
@@ -796,6 +803,7 @@ async function handleCredentialResponse(response) {
     showApp(name);
     updateRoleUI();
     initApp();
+    initSessionTimeout();
 
   } catch (err) {
     showLoginDenied('Could not verify access. Check your connection and try again.');
@@ -838,6 +846,61 @@ function logout() {
   location.reload();
 }
 
+// ── SESSION TIMEOUT (30 min inactivity) ───────────────────────────────────────
+const SESSION_TIMEOUT_MS  = 30 * 60 * 1000;  // 30 minutes
+const SESSION_WARNING_MS  = 25 * 60 * 1000;  // warn at 25 minutes
+let   _sessionTimer       = null;
+let   _sessionWarnTimer   = null;
+let   _sessionWarnShown   = false;
+
+function resetSessionTimer() {
+  clearTimeout(_sessionTimer);
+  clearTimeout(_sessionWarnTimer);
+  _sessionWarnShown = false;
+
+  // Hide warning banner if it's showing
+  const banner = document.getElementById('session-warn-banner');
+  if (banner) banner.style.display = 'none';
+
+  // Warning at 25 min
+  _sessionWarnTimer = setTimeout(() => {
+    if (!getUser()) return; // already logged out
+    _sessionWarnShown = true;
+    const banner = document.getElementById('session-warn-banner');
+    if (banner) { banner.style.display = ''; startSessionCountdown(5 * 60); }
+  }, SESSION_WARNING_MS);
+
+  // Auto-logout at 30 min
+  _sessionTimer = setTimeout(() => {
+    if (!getUser()) return;
+    showToast('⏱️ Session expired after 30 minutes of inactivity. Signing you out…', '#F59E0B');
+    setTimeout(logout, 2000); // small delay so toast is readable
+  }, SESSION_TIMEOUT_MS);
+}
+
+let _countdownInterval = null;
+function startSessionCountdown(secondsLeft) {
+  clearInterval(_countdownInterval);
+  const countEl = document.getElementById('session-countdown');
+  function tick() {
+    if (secondsLeft <= 0) { clearInterval(_countdownInterval); return; }
+    const m = Math.floor(secondsLeft / 60);
+    const s = secondsLeft % 60;
+    if (countEl) countEl.textContent = `${m}:${s.toString().padStart(2,'0')}`;
+    secondsLeft--;
+  }
+  tick();
+  _countdownInterval = setInterval(tick, 1000);
+}
+
+function initSessionTimeout() {
+  // Listen for any user activity to reset the 30-min clock
+  ['click','keydown','mousemove','touchstart','scroll'].forEach(evt =>
+    document.addEventListener(evt, resetSessionTimer, { passive: true })
+  );
+  resetSessionTimer(); // start the first timer immediately
+}
+
 // ── BOOT ──────────────────────────────────────────────────────────────────────
 (function boot() {
   const user = getUser();
@@ -850,6 +913,7 @@ function logout() {
     showApp(user.name);
     updateRoleUI();
     initApp();
+    initSessionTimeout();
   }
 })();
 
@@ -1083,25 +1147,60 @@ function renderDashboard() {
   renderPlatformChart();
   renderStatusChart();
 
-  // Recent table (last 6 for selected agent+month)
-  const myRec = cachedData
-    .filter(r => (r.agentEmail||'').toLowerCase() === targetEmail && (r.month||'').substring(0,7) === selectedMonth)
-    .sort((a,b) => new Date(b.submittedAt||0) - new Date(a.submittedAt||0))
-    .slice(0, 6);
+  // ── Specialist Ranking Card ──────────────────────────────────────────────────
+  const rankMonthLabel = document.getElementById('dash-rank-month-label');
+  if (rankMonthLabel) rankMonthLabel.textContent = formatMonthLabel(selectedMonth);
 
-  const tbody = document.getElementById('dash-recent-body');
-  if (!myRec.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-state"><div class="icon">📭</div><p>No reviews submitted yet this month.</p></td></tr>`;
-  } else {
-    tbody.innerHTML = myRec.map(r => `
-      <tr>
-        <td>${formatDate(r.submittedAt)}</td>
-        <td>${escHtml(r.platform || '—')}</td>
-        <td>${escHtml(r.customerName || '—')}</td>
-        <td><a href="#" style="color:#4F46E5;text-decoration:none" onclick="return false">${escHtml(r.ticketId || '—')}</a></td>
-        <td>${statusBadge(r.finalStatus)}</td>
-        <td>${r.finalStatus === 'Valid' ? `<strong style="color:#4F46E5">$${r.bonusRate||0}</strong>` : '—'}</td>
-      </tr>`).join('');
+  // Build leaderboard from cache for the selected month
+  const lb = buildLeaderboardFromCache(selectedMonth);
+  const myIdx = lb.findIndex(a => a.email === targetEmail);
+  const myRank = myIdx >= 0 ? myIdx + 1 : null;
+
+  const rankingBody = document.getElementById('dash-ranking-body');
+  if (rankingBody) {
+    if (!lb.length) {
+      rankingBody.innerHTML = `<div class="empty-state"><div class="icon">🏅</div><p>No reviews found for ${formatMonthLabel(selectedMonth)}.</p></div>`;
+    } else {
+      // Show rank headline for the viewed agent
+      const myEntry = myIdx >= 0 ? lb[myIdx] : null;
+      const rankEmoji = myRank === 1 ? '🥇' : myRank === 2 ? '🥈' : myRank === 3 ? '🥉' : myRank ? `#${myRank}` : '—';
+      const headlineHtml = myEntry ? `
+        <div style="display:flex;align-items:center;gap:1rem;padding:.85rem 1rem;border-radius:.75rem;background:linear-gradient(135deg,#EEF2FF,#F5F3FF);border:1.5px solid #C7D2FE;margin-bottom:1rem">
+          <div style="font-size:2.2rem;min-width:2.5rem;text-align:center">${rankEmoji}</div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:1rem;color:#1E293B">${escHtml(myEntry.name)}</div>
+            <div style="font-size:.82rem;color:#64748B">Ranked <strong style="color:#4F46E5">${myRank} of ${lb.length}</strong> specialists · ${myEntry.valid} valid review${myEntry.valid!==1?'s':''} · <strong style="color:#10B981">$${myEntry.bonus}</strong> bonus</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:.78rem;color:#64748B">${escHtml(myEntry.tier)}</div>
+          </div>
+        </div>` : `<div style="padding:.5rem 0;font-size:.85rem;color:#94A3B8">No reviews submitted yet this month.</div>`;
+
+      // Show top 5 peers around the agent's position
+      const top5 = lb.slice(0, 5);
+      // If agent is outside top 5, ensure they appear
+      if (myIdx >= 5 && myEntry) top5.push({ ...myEntry, _gap: myIdx > 5 });
+      const peerRows = top5.map((a, displayIdx) => {
+        const realRank  = lb.findIndex(x => x.email === a.email) + 1;
+        const isMe      = a.email === targetEmail;
+        const rankIcon  = realRank === 1 ? '🥇' : realRank === 2 ? '🥈' : realRank === 3 ? '🥉' : `${realRank}`;
+        const gapRow    = a._gap ? `<div style="text-align:center;color:#94A3B8;font-size:.78rem;padding:.25rem 0">· · ·</div>` : '';
+        return `${gapRow}
+          <div class="lb-row" style="${isMe ? 'background:#EEF2FF;border:1.5px solid #C7D2FE;' : ''}font-size:.88rem;padding:.6rem .85rem">
+            <div style="font-size:1rem;font-weight:700;width:2rem;text-align:center;${realRank<=3?'color:'+(realRank===1?'#D97706':realRank===2?'#64748B':'#92400E'):''}">${rankIcon}</div>
+            <div style="flex:1">
+              <span style="font-weight:600">${escHtml(a.name)}</span>
+              ${isMe ? '<span style="color:#4F46E5;font-size:.72rem;margin-left:.35rem">(you)</span>' : ''}
+            </div>
+            <div style="display:flex;gap:.5rem;align-items:center">
+              <span class="badge badge-valid" style="font-size:.72rem">✅ ${a.valid}</span>
+              <strong style="color:#4F46E5;font-size:.9rem">$${a.bonus}</strong>
+            </div>
+          </div>`;
+      }).join('');
+
+      rankingBody.innerHTML = headlineHtml + `<div style="margin-top:.25rem">${peerRows}</div>`;
+    }
   }
 }
 
@@ -1419,13 +1518,15 @@ function clearFilters() {
   renderReviews();
 }
 
-// ── ALL REVIEWS TABLE (admin + supervisor) ────────────────────────────────────
+// ── ALL REVIEWS TABLE (all roles — agents see only their own) ─────────────────
 function renderAllReviews() {
-  const isAdm = isCurrentUserAdmin();
-  const isSup = isCurrentUserSupervisor();
-  const u     = getUser();
+  const isAdm   = isCurrentUserAdmin();
+  const isSup   = isCurrentUserSupervisor();
+  const isAgent = !isAdm && !isSup;
+  const u       = getUser();
+  const myEmail = (u?.email || '').toLowerCase();
 
-  // Populate supervisor filter (admin only)
+  // Supervisor filter — admin only
   const supFilter = document.getElementById('ar-filter-supervisor');
   if (supFilter) {
     supFilter.style.display = isAdm ? '' : 'none';
@@ -1433,26 +1534,28 @@ function renderAllReviews() {
       const supervisors = [...new Set(cachedSupervisorMappings.map(m => m.supervisorName).filter(Boolean))].sort();
       supervisors.forEach(name => {
         const opt = document.createElement('option');
-        opt.value = name;
-        opt.textContent = name;
+        opt.value = name; opt.textContent = name;
         supFilter.appendChild(opt);
       });
     }
   }
 
-  // Populate agent filter
+  // Agent filter — admin + supervisor only (agents always see only themselves)
   const agentFilter = document.getElementById('ar-filter-agent');
-  if (agentFilter && agentFilter.options.length <= 1) {
-    const agents = [...new Map(cachedData.filter(r => r.agentEmail)
-      .map(r => [r.agentEmail.toLowerCase(), r.agentName || r.agentEmail]))].sort((a,b) => a[1].localeCompare(b[1]));
-    agents.forEach(([email, name]) => {
-      const opt = document.createElement('option');
-      opt.value = email; opt.textContent = name;
-      agentFilter.appendChild(opt);
-    });
+  if (agentFilter) {
+    agentFilter.style.display = isAgent ? 'none' : '';
+    if (!isAgent && agentFilter.options.length <= 1) {
+      const agents = [...new Map(cachedData.filter(r => r.agentEmail)
+        .map(r => [r.agentEmail.toLowerCase(), r.agentName || r.agentEmail]))].sort((a,b) => a[1].localeCompare(b[1]));
+      agents.forEach(([email, name]) => {
+        const opt = document.createElement('option');
+        opt.value = email; opt.textContent = name;
+        agentFilter.appendChild(opt);
+      });
+    }
   }
 
-  // Populate platform filter
+  // Platform filter
   const platFilter = document.getElementById('ar-filter-platform');
   if (platFilter && platFilter.options.length <= 1) {
     const platforms = [...new Set(cachedData.map(r => r.platform).filter(Boolean))].sort();
@@ -1464,18 +1567,22 @@ function renderAllReviews() {
   }
 
   const supVal   = document.getElementById('ar-filter-supervisor')?.value || '';
-  const agentVal = document.getElementById('ar-filter-agent')?.value      || '';
+  const agentVal = isAgent ? myEmail : (document.getElementById('ar-filter-agent')?.value || '');
   const platVal  = document.getElementById('ar-filter-platform')?.value   || '';
   const statVal  = document.getElementById('ar-filter-status')?.value     || '';
   const monthVal = document.getElementById('ar-filter-month')?.value      || '';
 
-  let rows = [...cachedData].sort((a,b) => new Date(b.submittedAt||0) - new Date(a.submittedAt||0));
+  // Agents are scoped to their own records only
+  let rows = isAgent
+    ? cachedData.filter(r => (r.agentEmail||'').toLowerCase() === myEmail)
+    : [...cachedData];
+  rows = rows.sort((a,b) => new Date(b.submittedAt||0) - new Date(a.submittedAt||0));
 
-  if (supVal)   rows = rows.filter(r => safeStr(r.supervisorName) === supVal);
-  if (agentVal) rows = rows.filter(r => (r.agentEmail||'').toLowerCase() === agentVal);
-  if (platVal)  rows = rows.filter(r => r.platform === platVal);
-  if (statVal)  rows = rows.filter(r => r.finalStatus === statVal);
-  if (monthVal) rows = rows.filter(r => (r.month || '').substring(0,7) === monthVal);
+  if (supVal)              rows = rows.filter(r => safeStr(r.supervisorName) === supVal);
+  if (agentVal && !isAgent) rows = rows.filter(r => (r.agentEmail||'').toLowerCase() === agentVal);
+  if (platVal)             rows = rows.filter(r => r.platform === platVal);
+  if (statVal)             rows = rows.filter(r => r.finalStatus === statVal);
+  if (monthVal)            rows = rows.filter(r => (r.month || '').substring(0,7) === monthVal);
 
   const countEl = document.getElementById('ar-count');
   if (countEl) countEl.textContent = `${rows.length} review${rows.length !== 1 ? 's' : ''}`;
@@ -1507,7 +1614,7 @@ function renderAllReviews() {
       <td>
         <div class="inline-actions">
           ${r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View screenshot">📸</a>` : ''}
-          ${r.finalStatus === 'Pending Review' ? `
+          ${(!isAgent && r.finalStatus === 'Pending Review') ? `
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','approve')">✅ Approve</button>
             <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','reject')">❌ Reject</button>
           ` : ''}
@@ -1581,6 +1688,10 @@ function renderLeaderboard() {
   let data = (selected === cur) ? cachedLeaderboard : buildLeaderboardFromCache(selected);
   if (agentFilter) data = data.filter(a => a.email === agentFilter);
 
+  // Cap to top 10
+  const fullCount = data.length;
+  if (!agentFilter) data = data.slice(0, 10);
+
   const list = document.getElementById('leaderboard-list');
   if (!data.length) {
     list.innerHTML = `<div class="empty-state"><div class="icon">🏆</div><p>No reviews found for ${formatMonthLabel(selected)}.</p></div>`;
@@ -1609,7 +1720,7 @@ function renderLeaderboard() {
           <div class="lb-tier-badge">${escHtml(a.tier)}</div>
         </div>
       </div>`;
-  }).join('');
+  }).join('') + (!agentFilter && fullCount > 10 ? `<div style="text-align:center;font-size:.78rem;color:#94A3B8;padding:.75rem 0">Showing top 10 of ${fullCount} specialists</div>` : '');
 }
 
 function clearLeaderboardFilters() {
@@ -1633,22 +1744,59 @@ let cachedAllPayouts      = []; // MoM history cache
 let selectedScreenshotFile = null; // holds the File object chosen in the upload dropzone
 
 function renderPayoutEmpty() {
+  const isAdm   = isCurrentUserAdmin();
+  const isSup   = isCurrentUserSupervisor();
+  const isAgent = !isAdm && !isSup;
+
   const monthInput = document.getElementById('payout-month');
   if (!monthInput.value) monthInput.value = currentMonthStr();
+
+  // Show/hide admin-only controls
+  const filterAgentWrap = document.getElementById('payout-agent-filter-wrap');
+  const generateBtn     = document.getElementById('payout-generate-btn');
+  const loadSavedBtn    = document.getElementById('payout-load-saved-btn');
+  if (filterAgentWrap) filterAgentWrap.style.display = isAgent ? 'none' : '';
+  if (generateBtn)     generateBtn.style.display     = isAgent ? 'none' : '';
+  if (loadSavedBtn)    loadSavedBtn.style.display    = isAgent ? 'none' : '';
+
   document.getElementById('payout-empty').style.display = '';
   document.getElementById('payout-total-banner').style.display = 'none';
   document.getElementById('payout-body').innerHTML = '';
   loadAllPayoutHistory(); // always refresh MoM history when page opens
+
+  // Agents: auto-load their own payout for the selected month
+  if (isAgent) autoLoadAgentPayout();
+}
+
+async function autoLoadAgentPayout() {
+  const month = document.getElementById('payout-month')?.value || currentMonthStr();
+  try {
+    const u   = getUser();
+    const url = `${scriptUrl()}?action=getPayouts&month=${encodeURIComponent(month)}&email=${encodeURIComponent(u?.email||'')}`;
+    const res = await fetch(url, { redirect: 'follow' });
+    const data = await res.json();
+    if (data.error || !data.payouts?.length) return; // no payout yet — stay empty
+    const myEmail = (u?.email||'').toLowerCase();
+    const myRows  = normalizePayoutRows(data.payouts).filter(p => p.agentEmail.toLowerCase() === myEmail);
+    if (!myRows.length) return;
+    const total = myRows.reduce((s,p) => s + Number(p.total||0), 0);
+    renderPayoutTable(myRows, total, month);
+  } catch (err) {
+    console.warn('Agent payout auto-load failed:', err.message);
+  }
 }
 
 async function generatePayout() {
+  const isAdm = isCurrentUserAdmin();
+  const isSup = isCurrentUserSupervisor();
+  if (!isAdm && !isSup) return; // agents cannot generate
   const month = document.getElementById('payout-month').value || currentMonthStr();
   showLoading(true, 'Calculating payouts…');
   try {
     const data = await apiPost({ action: 'generatePayout', month });
     renderPayoutTable(data.payouts, data.grandTotal, month);
     showToast(`✅ Payout report generated for ${formatMonthLabel(month)}`, '#10B981');
-    loadAllPayoutHistory(); // refresh MoM after generating
+    loadAllPayoutHistory();
   } catch (err) {
     showToast('Error: ' + err.message, '#EF4444');
   } finally {
@@ -1657,6 +1805,9 @@ async function generatePayout() {
 }
 
 async function loadPayoutData() {
+  const isAdm = isCurrentUserAdmin();
+  const isSup = isCurrentUserSupervisor();
+  const isAgent = !isAdm && !isSup;
   const month = document.getElementById('payout-month').value || currentMonthStr();
   showLoading(true, 'Loading saved payout data…');
   try {
@@ -1669,7 +1820,9 @@ async function loadPayoutData() {
       showToast('No saved payout data for this month. Click Generate Report.', '#F59E0B');
       return;
     }
-    const rows = normalizePayoutRows(data.payouts);
+    let rows = normalizePayoutRows(data.payouts);
+    // Agents see only their own record
+    if (isAgent) rows = rows.filter(p => p.agentEmail.toLowerCase() === (u?.email||'').toLowerCase());
     const grandTotal = rows.reduce((s, r) => s + Number(r.total), 0);
     renderPayoutTable(rows, grandTotal, month);
   } catch (err) {
@@ -1729,6 +1882,7 @@ function renderPayoutTable(rows, grandTotal, month) {
 }
 
 function renderPayoutRows(normalized, grandTotal, month) {
+  const canMarkPaid = isCurrentUserAdmin() || isCurrentUserSupervisor();
   document.getElementById('payout-agent-count').textContent = `${normalized.length} agent${normalized.length !== 1 ? 's' : ''}`;
   document.getElementById('payout-grand-total').textContent = `$${grandTotal}`;
   document.getElementById('payout-body').innerHTML = normalized.map((p, i) => {
@@ -1751,10 +1905,11 @@ function renderPayoutRows(normalized, grandTotal, month) {
           ${isPaid && p.paidDate ? `<div style="font-size:.7rem;color:#94A3B8;margin-top:.2rem">${formatDate(p.paidDate)}</div>` : ''}
       </td>
       <td>
+        ${canMarkPaid ? `
         <button class="btn btn-sm ${isPaid ? 'btn-secondary' : 'btn-primary'}"
           onclick="togglePaid('${escHtml(month)}','${escHtml(p.agentEmail)}','${isPaid ? 'Unpaid' : 'Paid'}')">
           ${isPaid ? '↩ Undo' : '✅ Mark Paid'}
-        </button>
+        </button>` : '—'}
       </td>
     </tr>`;
   }).join('');
@@ -1784,7 +1939,14 @@ async function loadAllPayoutHistory() {
     const data = await res.json();
     if (data.error || !data.payouts) return;
 
-    cachedAllPayouts = normalizePayoutRows(data.payouts);
+    let rows = normalizePayoutRows(data.payouts);
+    // Agents only see their own history
+    const isAdm = isCurrentUserAdmin();
+    const isSup = isCurrentUserSupervisor();
+    if (!isAdm && !isSup) {
+      rows = rows.filter(p => p.agentEmail.toLowerCase() === (u?.email||'').toLowerCase());
+    }
+    cachedAllPayouts = rows;
     renderMoMTable(cachedAllPayouts);
     renderPayoutSummary(cachedAllPayouts);
   } catch (err) {
@@ -2203,8 +2365,8 @@ function updateRoleUI() {
   const allReviewsBtn = document.getElementById('btn-allreviews');
 
   if (adminBtn)      adminBtn.style.display      = isAdm ? 'inline-flex' : 'none';
-  if (payoutBtn)     payoutBtn.style.display     = isAdm ? 'inline-flex' : 'none';
-  if (allReviewsBtn) allReviewsBtn.style.display = (isAdm || isSup) ? 'inline-flex' : 'none';
+  if (payoutBtn)     payoutBtn.style.display     = 'inline-flex'; // all roles can see Payouts
+  if (allReviewsBtn) allReviewsBtn.style.display = 'inline-flex'; // all roles can see All Reviews
 
   // Notification dot on Admin button for pending supervisor reviews
   if (isAdm && adminBtn) {
