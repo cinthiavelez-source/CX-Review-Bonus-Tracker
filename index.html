@@ -2462,18 +2462,22 @@ async function saveHierarchyEntry() {
 
   showLoading(true, 'Saving…');
   try {
-    await apiPost({
+    const result = await apiPost({
       action: 'saveHierarchyEntry',
       email, name, role,
       supervisorEmail: supEmail,
       supervisorName:  supName,
       originalEmail:   origEmail
     });
-    // Update local cache optimistically
-    const idx   = cachedHierarchy.findIndex(h => safeStr(h.email).toLowerCase() === (origEmail || email));
-    const entry = { email, name, role, supervisorEmail: supEmail, supervisorName: supName };
-    if (idx >= 0) cachedHierarchy[idx] = entry;
-    else          cachedHierarchy.push(entry);
+    // Use server-returned hierarchy if available, otherwise update optimistically
+    if (result.hierarchy) {
+      cachedHierarchy = result.hierarchy;
+    } else {
+      const idx   = cachedHierarchy.findIndex(h => safeStr(h.email).toLowerCase() === (origEmail || email));
+      const entry = { email, name, role, supervisorEmail: supEmail, supervisorName: supName };
+      if (idx >= 0) cachedHierarchy[idx] = entry;
+      else          cachedHierarchy.push(entry);
+    }
     cancelHierarchyEdit();
     renderHierarchy();
     showToast(`✅ ${name} saved.`, '#10B981');
@@ -2486,8 +2490,12 @@ async function deleteHierarchyEntry(email, name) {
   if (!confirm(`Remove ${name || email} from the team hierarchy? They will lose access to the tracker.`)) return;
   showLoading(true, 'Removing…');
   try {
-    await apiPost({ action: 'deleteHierarchyEntry', email });
-    cachedHierarchy = cachedHierarchy.filter(h => safeStr(h.email).toLowerCase() !== email.toLowerCase());
+    const result = await apiPost({ action: 'deleteHierarchyEntry', email });
+    if (result.hierarchy) {
+      cachedHierarchy = result.hierarchy;
+    } else {
+      cachedHierarchy = cachedHierarchy.filter(h => safeStr(h.email).toLowerCase() !== email.toLowerCase());
+    }
     renderHierarchy();
     showToast(`✅ ${name || email} removed.`, '#10B981');
   } catch(err) {
