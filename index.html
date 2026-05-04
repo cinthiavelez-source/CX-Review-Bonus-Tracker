@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CX Review Bonus Tracker</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⭐</text></svg>" />
+  <!-- Google Identity Services — required for Sign in with Google -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -186,19 +188,50 @@
 
 <!-- Login Overlay -->
 <div class="login-overlay" id="login-overlay">
-  <div class="login-card">
+  <div class="login-card" style="text-align:center">
     <div class="login-logo">⭐</div>
     <div class="login-title">CX Review Tracker</div>
-    <div class="login-sub">Sign in with your work email to track your bonus</div>
-    <div class="form-group">
-      <label>Your Name</label>
-      <input type="text" id="login-name" placeholder="e.g. Maria Lopez" />
+    <div class="login-sub" style="margin-bottom:2rem">Sign in with your CookUnity Google account to continue</div>
+
+    <!-- Google Sign-In button — rendered by Google Identity Services -->
+    <div id="google-signin-area">
+      <!-- ↓ PASTE YOUR GOOGLE CLIENT ID IN data-client_id BELOW ↓ -->
+      <div id="g_id_onload"
+        data-client_id="715765404872-4g66u964e16hikb0fv1juh0vhir2l0o6.apps.googleusercontent.com"
+        data-callback="handleCredentialResponse"
+        data-auto_select="false"
+        data-itp_support="true"
+        data-hd="cookunity.com">
+      </div>
+      <div class="g_id_signin"
+        data-type="standard"
+        data-size="large"
+        data-theme="outline"
+        data-text="sign_in_with"
+        data-shape="rectangular"
+        data-logo_alignment="left"
+        data-width="280">
+      </div>
+      <p style="font-size:.75rem;color:#94A3B8;margin-top:1rem">Only @cookunity.com accounts are accepted</p>
     </div>
-    <div class="form-group">
-      <label>Work Email</label>
-      <input type="email" id="login-email" placeholder="you@cookunity.com" />
+
+    <!-- Verifying state (shown while backend checks allowlist) -->
+    <div id="login-verifying" style="display:none;padding:1rem 0">
+      <div style="font-size:2rem;margin-bottom:.5rem">⏳</div>
+      <div style="color:#64748B;font-size:.9rem;font-weight:500">Verifying access…</div>
     </div>
-    <button class="btn btn-primary" onclick="doLogin()">Sign In →</button>
+
+    <!-- Access denied state -->
+    <div id="login-denied" style="display:none;padding:.5rem 0">
+      <div style="font-size:2.5rem;margin-bottom:.75rem">🚫</div>
+      <div style="font-weight:700;color:#EF4444;font-size:1rem;margin-bottom:.5rem">Access Denied</div>
+      <div id="login-denied-msg" style="font-size:.85rem;color:#64748B;line-height:1.5;margin-bottom:1.25rem">
+        Your account is not on the access list.
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="retryGoogleSignIn()" style="font-size:.83rem">
+        ↩ Try a different account
+      </button>
+    </div>
   </div>
 </div>
 
@@ -706,27 +739,102 @@ let currentPage             = 'dashboard';
 let platformChart     = null;
 let statusChart       = null;
 
-// ── AUTH ──────────────────────────────────────────────────────────────────────
-function getUser()       { try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch(e) { return null; } }
-function saveUser(u)     { localStorage.setItem(USER_KEY, JSON.stringify(u)); }
-function scriptUrl()     { return localStorage.getItem(CFG_KEY) || DEFAULT_SCRIPT_URL; }
+// ── AUTH — Google Sign-In ─────────────────────────────────────────────────────
+// ⚠️  Replace PASTE_YOUR_GOOGLE_CLIENT_ID_HERE (in the HTML above) with your
+//    actual OAuth 2.0 Client ID from Google Cloud Console.
+//    Authorized JavaScript origin must include your GitHub Pages URL.
 
-function doLogin() {
-  const name  = document.getElementById('login-name').value.trim();
-  const email = document.getElementById('login-email').value.trim().toLowerCase();
-  if (!name)  { showToast('Please enter your name.', '#EF4444'); return; }
-  if (!email || !email.includes('@')) { showToast('Please enter a valid email.', '#EF4444'); return; }
-  saveUser({ name, email });
+function getUser()   { try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch(e) { return null; } }
+function saveUser(u) { localStorage.setItem(USER_KEY, JSON.stringify(u)); }
+function scriptUrl() { return localStorage.getItem(CFG_KEY) || DEFAULT_SCRIPT_URL; }
+
+// Decode the Google JWT payload (signature already verified by Google's servers)
+function parseGoogleJwt(token) {
+  try {
+    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(decodeURIComponent(atob(base64).split('').map(c =>
+      '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')));
+  } catch(e) { return null; }
+}
+
+// Called by Google Identity Services after the user chooses their account
+async function handleCredentialResponse(response) {
+  const payload = parseGoogleJwt(response.credential);
+  if (!payload || !payload.email) {
+    showLoginDenied('Could not read account info from Google. Please try again.');
+    return;
+  }
+
+  const email = payload.email.toLowerCase();
+  const name  = payload.name || email;
+
+  // Hard-gate: must be a @cookunity.com address
+  if (!email.endsWith('@cookunity.com')) {
+    showLoginDenied(`${email} is not a CookUnity work account. Please use your @cookunity.com Google account.`);
+    return;
+  }
+
+  // Show "Verifying…" while we check the allowlist on the backend
+  document.getElementById('google-signin-area').style.display = 'none';
+  document.getElementById('login-verifying').style.display    = '';
+  document.getElementById('login-denied').style.display       = 'none';
+
+  try {
+    const url  = `${scriptUrl()}?action=verifyAccess&email=${encodeURIComponent(email)}`;
+    const res  = await fetch(url, { redirect: 'follow' });
+    const data = await res.json();
+
+    if (data.error || !data.allowed) {
+      showLoginDenied(
+        `${email} is not on the access list. Contact Cinthia or your admin to request access.`
+      );
+      return;
+    }
+
+    // ✅ Access granted — save verified user and open the app
+    saveUser({ name, email, picture: payload.picture || '' });
+    showApp(name);
+    updateRoleUI();
+    initApp();
+
+  } catch (err) {
+    showLoginDenied('Could not verify access. Check your connection and try again.');
+  }
+}
+
+function showApp(name) {
   document.getElementById('login-overlay').style.display = 'none';
   document.getElementById('main-nav').style.display      = '';
   document.getElementById('main-content').style.display  = '';
-  document.getElementById('nav-user-label').textContent  = name;
-  updateRoleUI();
-  initApp();
+  // Show avatar/name in navbar
+  const label = document.getElementById('nav-user-label');
+  const u = getUser();
+  if (label) {
+    label.innerHTML = u?.picture
+      ? `<img src="${u.picture}" style="width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.5);vertical-align:middle;margin-right:.35rem" referrerpolicy="no-referrer" />${escHtml(name)}`
+      : escHtml(name);
+  }
+}
+
+function showLoginDenied(msg) {
+  document.getElementById('google-signin-area').style.display = 'none';
+  document.getElementById('login-verifying').style.display    = 'none';
+  document.getElementById('login-denied').style.display       = '';
+  document.getElementById('login-denied-msg').textContent     = msg;
+}
+
+function retryGoogleSignIn() {
+  document.getElementById('google-signin-area').style.display = '';
+  document.getElementById('login-verifying').style.display    = 'none';
+  document.getElementById('login-denied').style.display       = 'none';
+  // Cancel any active one-tap so the user can pick a different Google account
+  if (window.google?.accounts?.id) google.accounts.id.cancel();
 }
 
 function logout() {
   localStorage.removeItem(USER_KEY);
+  // Disable Google's auto-select so they see the account picker on next load
+  if (window.google?.accounts?.id) google.accounts.id.disableAutoSelect();
   location.reload();
 }
 
@@ -734,12 +842,12 @@ function logout() {
 (function boot() {
   const user = getUser();
   if (!user) {
+    // No stored session — show login overlay with Google Sign-In button
     document.getElementById('login-overlay').style.display = '';
   } else {
-    document.getElementById('login-overlay').style.display      = 'none';
-    document.getElementById('main-nav').style.display           = '';
-    document.getElementById('main-content').style.display       = '';
-    document.getElementById('nav-user-label').textContent       = user.name;
+    // Returning user with a saved session — open app immediately
+    // (Google re-auth only happens after logout or session cleared)
+    showApp(user.name);
     updateRoleUI();
     initApp();
   }
