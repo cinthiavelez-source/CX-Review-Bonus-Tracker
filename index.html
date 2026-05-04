@@ -2464,7 +2464,8 @@ async function saveHierarchyEntry() {
   try {
     const result = await apiPost({
       action: 'saveHierarchyEntry',
-      email, name, role,
+      entryEmail:      email,    // renamed to avoid conflict with auth 'email' field in apiPost
+      name, role,
       supervisorEmail: supEmail,
       supervisorName:  supName,
       originalEmail:   origEmail
@@ -2490,7 +2491,7 @@ async function deleteHierarchyEntry(email, name) {
   if (!confirm(`Remove ${name || email} from the team hierarchy? They will lose access to the tracker.`)) return;
   showLoading(true, 'Removing…');
   try {
-    const result = await apiPost({ action: 'deleteHierarchyEntry', email });
+    const result = await apiPost({ action: 'deleteHierarchyEntry', entryEmail: email });
     if (result.hierarchy) {
       cachedHierarchy = result.hierarchy;
     } else {
