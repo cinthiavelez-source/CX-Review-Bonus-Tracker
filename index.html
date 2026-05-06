@@ -755,6 +755,60 @@
       </div>
     </div><!-- /hierarchy card -->
 
+    <!-- AUDIT LOG -->
+    <div class="card" id="audit-log-card">
+      <div class="card-title" style="justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+        <span>📋 Audit Log</span>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <span id="audit-total-label" style="font-size:.8rem;color:#94A3B8"></span>
+          <button class="btn btn-secondary btn-sm" onclick="loadAuditLog(true)">🔄 Refresh</button>
+        </div>
+      </div>
+      <p style="font-size:.82rem;color:#94A3B8;margin-bottom:.75rem">
+        Every login and key action performed in the app, in reverse chronological order. Visible to admins only.
+      </p>
+
+      <!-- Filters -->
+      <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center">
+        <input type="text" id="audit-search" placeholder="Search by name or email…" oninput="renderAuditLog()"
+          style="flex:1;min-width:160px;padding:.5rem .75rem;border:1.5px solid #E2E8F0;border-radius:.5rem;font-size:.85rem;outline:none" />
+        <select id="audit-action-filter" onchange="renderAuditLog()"
+          style="padding:.5rem .75rem;border:1.5px solid #E2E8F0;border-radius:.5rem;font-size:.85rem;background:white">
+          <option value="">All Actions</option>
+          <option value="LOGIN">Login</option>
+          <option value="SUBMIT_REVIEW">Submit Review</option>
+          <option value="APPROVE_REVIEW">Approve Review</option>
+          <option value="REJECT_REVIEW">Reject Review</option>
+          <option value="OVERRIDE_STATUS">Override Status</option>
+          <option value="DELETE_REVIEW">Delete Review</option>
+          <option value="GENERATE_PAYOUT">Generate Payout</option>
+          <option value="MARK_PAID">Mark Paid</option>
+          <option value="SAVE_HIERARCHY">Save Hierarchy</option>
+          <option value="DELETE_HIERARCHY">Delete Hierarchy</option>
+          <option value="IMPORT_HIERARCHY">Import Hierarchy</option>
+        </select>
+        <input type="date" id="audit-from-date" onchange="renderAuditLog()"
+          style="padding:.5rem .75rem;border:1.5px solid #E2E8F0;border-radius:.5rem;font-size:.85rem" />
+        <input type="date" id="audit-to-date" onchange="renderAuditLog()"
+          style="padding:.5rem .75rem;border:1.5px solid #E2E8F0;border-radius:.5rem;font-size:.85rem" />
+      </div>
+
+      <!-- Table -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th style="width:140px">When</th><th>Who</th><th style="width:140px">Action</th><th>Details</th></tr>
+          </thead>
+          <tbody id="audit-body">
+            <tr><td colspan="4" style="text-align:center;padding:2rem;color:#94A3B8">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="audit-load-more-wrap" style="display:none;text-align:center;margin-top:.75rem">
+        <button class="btn btn-secondary btn-sm" onclick="loadMoreAuditLog()">Load more entries</button>
+      </div>
+    </div><!-- /audit log card -->
+
   </div><!-- /page-admin -->
 
 </div><!-- /main -->
@@ -810,6 +864,20 @@ let hierImportRows          = [];   // pending CSV rows before import is confirm
 let currentPage             = 'dashboard';
 let platformChart     = null;
 let statusChart       = null;
+
+// ── AUDIT LOG ─────────────────────────────────────────────────────────────────
+let cachedAuditLog   = [];   // last fetched audit entries (admin only)
+let cachedAuditTotal = 0;
+let auditOffset      = 0;
+const AUDIT_PAGE_SIZE = 100;
+
+// Fire-and-forget — never blocks or shows a spinner
+function logAudit(action, details) {
+  const u = getUser();
+  if (!u) return;
+  apiPost({ action: 'logAudit', auditAction: action, details, name: u.name })
+    .catch(() => {}); // silently swallow errors; logging must never break the UI
+}
 
 // ── AUTH — Google Sign-In ─────────────────────────────────────────────────────
 // ⚠️  Replace PASTE_YOUR_GOOGLE_CLIENT_ID_HERE (in the HTML above) with your
@@ -869,6 +937,7 @@ async function handleCredentialResponse(response) {
     updateRoleUI();
     initApp();
     initSessionTimeout();
+    logAudit('LOGIN', `${name} logged in`);
 
   } catch (err) {
     showLoginDenied('Could not verify access. Check your connection and try again.');
@@ -1154,7 +1223,7 @@ function renderPage(page) {
   if (page === 'reviews')     renderReviews();
   if (page === 'leaderboard') renderLeaderboard();
   if (page === 'payout')      renderPayoutEmpty();
-  if (page === 'admin')       { loadReviewQueue(); loadHierarchy(); }
+  if (page === 'admin')       { loadReviewQueue(); loadHierarchy(); loadAuditLog(); }
   if (page === 'allreviews')  renderAllReviews();
 }
 
@@ -1430,10 +1499,11 @@ async function submitReview(e) {
     const result = await apiPost({ action: 'add', record });
 
     if (result.pendingReview) {
-      // Flagged submission — saved but waiting for supervisor
       showToast(`📋 Submitted & sent to your supervisor for review. It won't count toward your bonus until approved.`, '#7C3AED');
+      logAudit('SUBMIT_REVIEW', `Submitted review for ticket #${record.ticketId} on ${record.platform} — flagged for supervisor review`);
     } else {
       showToast('✅ Review submitted! AI validation complete — check My Reviews.', '#10B981');
+      logAudit('SUBMIT_REVIEW', `Submitted review for ticket #${record.ticketId} on ${record.platform}`);
     }
 
     clearSubmitForm();
@@ -1583,6 +1653,7 @@ async function confirmOverride() {
   try {
     await apiPost({ action: 'overrideValidation', id, finalStatus: status, overrideNote: note });
     showToast('✅ Override saved.', '#10B981');
+    logAudit('OVERRIDE_STATUS', `Overrode review ${id} → ${status}${note ? ` (note: ${note})` : ''}`);
     await apiFetch();
     renderReviews();
     renderDashboard();
@@ -1599,6 +1670,7 @@ async function deleteReview(id) {
   try {
     await apiPost({ action: 'delete', id });
     showToast('Deleted.', '#64748B');
+    logAudit('DELETE_REVIEW', `Deleted review ID ${id}`);
     await apiFetch();
     renderReviews();
   } catch (err) {
@@ -1916,6 +1988,7 @@ async function generatePayout() {
     const data = await apiPost({ action: 'generatePayout', month });
     renderPayoutTable(data.payouts, data.grandTotal, month);
     showToast(`✅ Payout report generated for ${formatMonthLabel(month)}`, '#10B981');
+    logAudit('GENERATE_PAYOUT', `Generated payout report for ${formatMonthLabel(month)} — ${data.payouts?.length || 0} agents, total $${data.grandTotal || 0}`);
     loadAllPayoutHistory();
   } catch (err) {
     showToast('Error: ' + err.message, '#EF4444');
@@ -2040,6 +2113,7 @@ async function togglePaid(month, agentEmail, newStatus) {
   showLoading(true, newStatus === 'Paid' ? 'Marking as paid…' : 'Reverting payment…');
   try {
     await apiPost({ action: 'markAsPaid', entries: [{ month, agentEmail }], paidStatus: newStatus });
+    logAudit('MARK_PAID', `${newStatus === 'Paid' ? 'Marked paid' : 'Reverted to Unpaid'} — ${agentEmail} for ${month}`);
     showToast(newStatus === 'Paid' ? `✅ Marked as paid.` : '↩ Reverted to Unpaid.', newStatus === 'Paid' ? '#10B981' : '#F59E0B');
     loadPayoutData();       // refresh the single-month table
     loadAllPayoutHistory(); // refresh MoM table
@@ -2320,6 +2394,8 @@ async function supervisorDecision(id, decision) {
   showLoading(true, decision === 'approve' ? 'Approving & sending to AI validation…' : 'Rejecting submission…');
   try {
     await apiPost({ action: 'supervisorReview', id, decision, supervisorNote: note });
+    const decLabel = decision === 'approve' ? 'APPROVE_REVIEW' : 'REJECT_REVIEW';
+    logAudit(decLabel, `${decision === 'approve' ? 'Approved' : 'Rejected'} review ID ${id}${note ? ` — note: ${note}` : ''}`);
     showToast(
       decision === 'approve'
         ? '✅ Approved! AI validation will run now.'
@@ -2334,6 +2410,111 @@ async function supervisorDecision(id, decision) {
   } finally {
     showLoading(false);
   }
+}
+
+// ── AUDIT LOG (Admin) ─────────────────────────────────────────────────────────
+
+const AUDIT_ACTION_META = {
+  LOGIN:             { label: 'Login',             color: '#3B82F6', bg: '#EFF6FF' },
+  SUBMIT_REVIEW:     { label: 'Submit Review',      color: '#10B981', bg: '#D1FAE5' },
+  APPROVE_REVIEW:    { label: 'Approve Review',     color: '#10B981', bg: '#D1FAE5' },
+  REJECT_REVIEW:     { label: 'Reject Review',      color: '#EF4444', bg: '#FEE2E2' },
+  OVERRIDE_STATUS:   { label: 'Override Status',    color: '#F59E0B', bg: '#FEF3C7' },
+  DELETE_REVIEW:     { label: 'Delete Review',      color: '#EF4444', bg: '#FEE2E2' },
+  GENERATE_PAYOUT:   { label: 'Generate Payout',   color: '#7C3AED', bg: '#EDE9FE' },
+  MARK_PAID:         { label: 'Mark Paid',          color: '#10B981', bg: '#D1FAE5' },
+  SAVE_HIERARCHY:    { label: 'Save Hierarchy',     color: '#4F46E5', bg: '#EEF2FF' },
+  DELETE_HIERARCHY:  { label: 'Delete Hierarchy',   color: '#EF4444', bg: '#FEE2E2' },
+  IMPORT_HIERARCHY:  { label: 'Import Hierarchy',   color: '#7C3AED', bg: '#EDE9FE' },
+};
+
+async function loadAuditLog(forceRefresh = false) {
+  if (!forceRefresh && cachedAuditLog.length) {
+    renderAuditLog(); // instant from cache
+    return;
+  }
+  auditOffset = 0;
+  cachedAuditLog = [];
+  document.getElementById('audit-body').innerHTML =
+    `<tr><td colspan="4" style="text-align:center;padding:2rem;color:#94A3B8">Loading…</td></tr>`;
+  try {
+    const u   = getUser();
+    const res = await fetch(
+      `${scriptUrl()}?action=getAuditLog&email=${encodeURIComponent(u?.email||'')}&limit=${AUDIT_PAGE_SIZE}&offset=0`,
+      { redirect: 'follow' }
+    );
+    const data = await res.json();
+    if (data.error) { console.warn('Audit log error:', data.error); return; }
+    cachedAuditLog   = data.entries || [];
+    cachedAuditTotal = data.total   || 0;
+    auditOffset      = cachedAuditLog.length;
+    const totalLabel = document.getElementById('audit-total-label');
+    if (totalLabel) totalLabel.textContent = `${cachedAuditTotal.toLocaleString()} total entries`;
+    renderAuditLog();
+  } catch(err) {
+    console.warn('Audit log fetch failed:', err.message);
+  }
+}
+
+async function loadMoreAuditLog() {
+  try {
+    const u   = getUser();
+    const res = await fetch(
+      `${scriptUrl()}?action=getAuditLog&email=${encodeURIComponent(u?.email||'')}&limit=${AUDIT_PAGE_SIZE}&offset=${auditOffset}`,
+      { redirect: 'follow' }
+    );
+    const data = await res.json();
+    if (data.error || !data.entries?.length) return;
+    cachedAuditLog = [...cachedAuditLog, ...data.entries];
+    auditOffset    = cachedAuditLog.length;
+    renderAuditLog();
+  } catch(err) {
+    console.warn('Load more audit failed:', err.message);
+  }
+}
+
+function renderAuditLog() {
+  const search     = (document.getElementById('audit-search')?.value       || '').toLowerCase().trim();
+  const actionFilt = (document.getElementById('audit-action-filter')?.value || '').toUpperCase();
+  const fromDate   = document.getElementById('audit-from-date')?.value     || '';
+  const toDate     = document.getElementById('audit-to-date')?.value       || '';
+
+  let rows = cachedAuditLog;
+  if (search)     rows = rows.filter(e => safeStr(e.name).toLowerCase().includes(search) || safeStr(e.email).toLowerCase().includes(search));
+  if (actionFilt) rows = rows.filter(e => safeStr(e.action).toUpperCase() === actionFilt);
+  if (fromDate)   rows = rows.filter(e => String(e.timestamp).substring(0,10) >= fromDate);
+  if (toDate)     rows = rows.filter(e => String(e.timestamp).substring(0,10) <= toDate);
+
+  const tbody = document.getElementById('audit-body');
+  if (!tbody) return;
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:2rem;color:#94A3B8;font-size:.85rem">
+      ${cachedAuditLog.length ? 'No entries match your filters.' : 'No audit entries yet.'}
+    </td></tr>`;
+    document.getElementById('audit-load-more-wrap').style.display = 'none';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(e => {
+    const meta = AUDIT_ACTION_META[e.action] || { label: e.action, color: '#64748B', bg: '#F1F5F9' };
+    const ts   = e.timestamp
+      ? new Date(e.timestamp).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit', hour12:true })
+      : '—';
+    return `<tr>
+      <td style="font-size:.78rem;color:#94A3B8;white-space:nowrap">${ts}</td>
+      <td>
+        <div style="font-size:.83rem;font-weight:600;color:#1E293B">${escHtml(e.name || e.email)}</div>
+        <div style="font-size:.75rem;color:#94A3B8">${escHtml(e.email)}</div>
+      </td>
+      <td><span style="background:${meta.bg};color:${meta.color};padding:.2rem .65rem;border-radius:9999px;font-size:.73rem;font-weight:700;white-space:nowrap">${meta.label}</span></td>
+      <td style="font-size:.82rem;color:#475569">${escHtml(e.details)}</td>
+    </tr>`;
+  }).join('');
+
+  // Show "load more" if there are more entries on the server
+  const moreWrap = document.getElementById('audit-load-more-wrap');
+  if (moreWrap) moreWrap.style.display = (cachedAuditTotal > cachedAuditLog.length && !search && !actionFilt && !fromDate && !toDate) ? '' : 'none';
 }
 
 // ── TEAM HIERARCHY (Admin) ────────────────────────────────────────────────────
@@ -2496,6 +2677,7 @@ async function saveHierarchyEntry() {
     cancelHierarchyEdit();
     renderHierarchy();
     showToast(`✅ ${name} saved.`, '#10B981');
+    logAudit('SAVE_HIERARCHY', `${origEmail ? 'Updated' : 'Added'} team member ${name} (${email}) as ${role}`);
   } catch(err) {
     showToast('Error: ' + err.message, '#EF4444');
   } finally { showLoading(false); }
@@ -2513,6 +2695,7 @@ async function deleteHierarchyEntry(email, name) {
     }
     renderHierarchy();
     showToast(`✅ ${name || email} removed.`, '#10B981');
+    logAudit('DELETE_HIERARCHY', `Removed team member ${name || email} from hierarchy`);
   } catch(err) {
     showToast('Error: ' + err.message, '#EF4444');
   } finally { showLoading(false); }
@@ -2628,7 +2811,9 @@ async function confirmHierarchyImport() {
     if (result.hierarchy) cachedHierarchy = result.hierarchy;
     cancelHierarchyImport();
     renderHierarchy();
-    showToast(`✅ Imported ${result.count ?? hierImportRows.length} rows (${mode} mode).`, '#10B981');
+    const importCount = result.count ?? hierImportRows.length;
+    showToast(`✅ Imported ${importCount} rows (${mode} mode).`, '#10B981');
+    logAudit('IMPORT_HIERARCHY', `Bulk imported ${importCount} team members (mode: ${mode})`);
   } catch(err) {
     showToast('Import error: ' + err.message, '#EF4444');
   } finally { showLoading(false); }
