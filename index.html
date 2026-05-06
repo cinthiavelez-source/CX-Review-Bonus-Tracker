@@ -31,8 +31,9 @@
 
     /* ── LAYOUT ── */
     .main { max-width: 1100px; margin: 0 auto; padding: 1.75rem 1.25rem; }
-    .page { display: none; }
-    .page.active { display: block; }
+    .page { display: none; opacity: 0; }
+    .page.active { display: block; animation: pageIn 0.12s ease forwards; }
+    @keyframes pageIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     .card { background: white; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.07); margin-bottom: 1.5rem; }
     .card-title { font-size: 1rem; font-weight: 600; color: #475569; margin-bottom: 1rem; display: flex; align-items: center; gap: .5rem; }
 
@@ -1859,6 +1860,7 @@ function clearDashboardFilters() {
 
 // ── PAYOUT REPORT ─────────────────────────────────────────────────────────────
 let cachedAllPayouts      = []; // MoM history cache
+let cachedAllPayoutsAt   = 0;  // timestamp of last MoM fetch (ms)
 let selectedScreenshotFile = null; // holds the File object chosen in the upload dropzone
 
 function renderPayoutEmpty() {
@@ -2049,7 +2051,17 @@ async function togglePaid(month, agentEmail, newStatus) {
 }
 
 // ── MoM PAYMENT HISTORY ───────────────────────────────────────────────────────
+const MOM_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 async function loadAllPayoutHistory() {
+  // If we have recent cached data, render it instantly and skip the fetch
+  const now = Date.now();
+  if (cachedAllPayouts.length && (now - cachedAllPayoutsAt) < MOM_CACHE_TTL) {
+    renderMoMTable(cachedAllPayouts);
+    renderPayoutSummary(cachedAllPayouts);
+    return;
+  }
+  // First load or stale — fetch fresh (no global spinner; MoM section shows nothing until ready)
   try {
     const u   = getUser();
     const url = `${scriptUrl()}?action=getAllPayouts&email=${encodeURIComponent(u?.email||'')}`;
@@ -2064,7 +2076,8 @@ async function loadAllPayoutHistory() {
     if (!isAdm && !isSup) {
       rows = rows.filter(p => p.agentEmail.toLowerCase() === (u?.email||'').toLowerCase());
     }
-    cachedAllPayouts = rows;
+    cachedAllPayouts   = rows;
+    cachedAllPayoutsAt = Date.now();
     renderMoMTable(cachedAllPayouts);
     renderPayoutSummary(cachedAllPayouts);
   } catch (err) {
@@ -2172,13 +2185,14 @@ function exportPayoutsCSV() {
 }
 
 // ── SUPERVISOR REVIEW QUEUE ───────────────────────────────────────────────────
-async function loadReviewQueue() {
-  const u = getUser();
-  try {
-    const res  = await fetch(`${scriptUrl()}?email=${encodeURIComponent(u?.email||'')}`, { redirect: 'follow' });
-    const data = await res.json();
+function loadReviewQueue() {
+  // Render instantly from cached data — no network call needed here
+  // (cachedData already has everything; background sync keeps it fresh)
+  renderReviewQueue();
+}
 
-    // Pull Pending Review items from the already-loaded cachedData (no extra fetch needed)
+function renderReviewQueue() {
+  try {
     const queue = cachedData.filter(r => r.finalStatus === 'Pending Review');
 
     const badge = document.getElementById('review-queue-badge');
@@ -2325,7 +2339,9 @@ async function supervisorDecision(id, decision) {
 // ── TEAM HIERARCHY (Admin) ────────────────────────────────────────────────────
 
 async function loadHierarchy() {
-  showLoading(true, 'Loading team hierarchy…');
+  // Render cached data instantly so the tab feels immediate
+  renderHierarchy();
+  // Then refresh from server in the background (no spinner, no blocking)
   try {
     const u   = getUser();
     const res = await fetch(
@@ -2333,13 +2349,11 @@ async function loadHierarchy() {
       { redirect: 'follow' }
     );
     const data = await res.json();
-    if (data.error) { showToast('Error: ' + data.error, '#EF4444'); return; }
+    if (data.error) return;
     cachedHierarchy = data.hierarchy || [];
-    renderHierarchy();
+    renderHierarchy();   // re-render with fresh data (usually no visible change)
   } catch(err) {
-    showToast('Error loading hierarchy: ' + err.message, '#EF4444');
-  } finally {
-    showLoading(false);
+    console.warn('Hierarchy refresh failed:', err.message);
   }
 }
 
