@@ -1680,6 +1680,24 @@ async function deleteReview(id) {
   }
 }
 
+async function quickMarkValid(id, agentName, platform) {
+  const note = prompt(`Override to Valid — optional note (e.g. "Verified manually by supervisor"):\n\nAgent: ${agentName}  |  Platform: ${platform}`, '') ;
+  if (note === null) return; // user clicked Cancel
+  showLoading(true, 'Saving override…');
+  try {
+    await apiPost({ action: 'overrideValidation', id, finalStatus: 'Valid', overrideNote: note || 'Supervisor override' });
+    showToast('✅ Marked as Valid.', '#10B981');
+    logAudit('OVERRIDE_STATUS', `Marked review ${id} Valid — agent: ${agentName}, platform: ${platform}${note ? `, note: ${note}` : ''}`);
+    await apiFetch();
+    renderAllReviews();
+    renderDashboard();
+  } catch (err) {
+    showToast('Error: ' + err.message, '#EF4444');
+  } finally {
+    showLoading(false);
+  }
+}
+
 function clearFilters() {
   ['filter-agent','filter-platform','filter-status'].forEach(id => {
     const el = document.getElementById(id);
@@ -1793,8 +1811,11 @@ function renderAllReviews() {
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','approve')">✅ Approve</button>
             <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','reject')">❌ Reject</button>
           ` : ''}
+          ${(!isAgent && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending')) ? `
+            <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" title="Override to Valid" onclick="quickMarkValid('${r.id}','${escHtml(r.agentName||r.agentEmail||'')}','${escHtml(r.platform||'')}')">✅ Mark Valid</button>
+          ` : ''}
           ${isAdm ? `
-            <button class="btn btn-secondary btn-icon" title="Manual override" onclick="openOverrideModal('${r.id}')">⚙️</button>
+            <button class="btn btn-secondary btn-icon" title="Manual override (any status)" onclick="openOverrideModal('${r.id}')">⚙️</button>
             <button class="btn btn-danger btn-icon" title="Delete" onclick="deleteReview('${r.id}')">🗑️</button>
           ` : ''}
         </div>
