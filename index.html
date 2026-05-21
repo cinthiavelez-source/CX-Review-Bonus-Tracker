@@ -280,7 +280,7 @@
       <div class="filters" style="background:white;border:1px solid #E2E8F0;border-radius:.75rem;padding:.5rem .75rem;margin:0">
         <span class="filter-label">View:</span>
         <select id="dash-filter-agent" onchange="renderDashboard()" style="display:none">
-          <option value="">My Stats</option>
+          <option value="">All Team</option>
         </select>
         <select id="dash-period" onchange="dashPeriodChange()" style="font-size:.82rem;border:1.5px solid #E2E8F0;border-radius:.5rem;padding:.35rem .6rem;color:#475569;background:white">
           <option value="month">This Month</option>
@@ -298,17 +298,17 @@
 
     <div class="stats-grid" id="stats-grid">
       <div class="stat-card green">
-        <div class="stat-label">Valid Reviews</div>
+        <div class="stat-label" id="stat-valid-label">Valid Reviews</div>
         <div class="stat-value" id="stat-valid">—</div>
         <div class="stat-sub" id="stat-month-label">This month</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Bonus Earned</div>
+        <div class="stat-label" id="stat-bonus-label">Bonus Earned</div>
         <div class="stat-value" id="stat-bonus">—</div>
         <div class="stat-sub" id="stat-tier">—</div>
       </div>
       <div class="stat-card purple">
-        <div class="stat-label">Rate Per Review</div>
+        <div class="stat-label" id="stat-rate-label">Rate Per Review</div>
         <div class="stat-value" id="stat-rate">—</div>
         <div class="stat-sub" id="stat-next-tier">—</div>
       </div>
@@ -320,7 +320,7 @@
     </div>
 
     <!-- Tier Progress Bar -->
-    <div class="card">
+    <div class="card" id="dash-tier-card">
       <div class="card-title">🏆 Tier Progress — <span id="dash-month-badge" style="color:#4F46E5"></span></div>
       <div class="tier-bar-wrap">
         <div class="tier-bar-label">
@@ -1242,20 +1242,21 @@ function renderPage(page) {
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
 function renderDashboard() {
-  const isAdm      = isCurrentUserAdmin();
-  const u          = getUser();
-  const fromDate   = document.getElementById('dash-from-date')?.value || '';
-  const toDate     = document.getElementById('dash-to-date')?.value   || '';
-  const agentSelectEl = document.getElementById('dash-filter-agent');
-  const selectedAgent = isAdm ? (agentSelectEl?.value || '') : '';
+  const isAdm  = isCurrentUserAdmin();
+  const isSup  = isCurrentUserSupervisor();
+  const u      = getUser();
+  const fromDate = document.getElementById('dash-from-date')?.value || '';
+  const toDate   = document.getElementById('dash-to-date')?.value   || '';
+  const agentSelectEl  = document.getElementById('dash-filter-agent');
+  const selectedAgent  = (isAdm || isSup) ? (agentSelectEl?.value || '') : '';
 
-  // Populate agent filter for admins
-  if (isAdm && agentSelectEl) {
+  // Show agent filter for admin / supervisor
+  if ((isAdm || isSup) && agentSelectEl) {
     agentSelectEl.style.display = '';
     if (agentSelectEl.options.length <= 1) {
-      const agents = [...new Map(cachedData.filter(r=>r.agentEmail)
-        .map(r=>[r.agentEmail.toLowerCase(), r.agentName||r.agentEmail]))].sort((a,b)=>a[1].localeCompare(b[1]));
-      agents.forEach(([email,name]) => {
+      const agents = [...new Map(cachedData.filter(r => r.agentEmail)
+        .map(r => [r.agentEmail.toLowerCase(), r.agentName || r.agentEmail]))].sort((a,b) => a[1].localeCompare(b[1]));
+      agents.forEach(([email, name]) => {
         const opt = document.createElement('option');
         opt.value = email; opt.textContent = name;
         agentSelectEl.appendChild(opt);
@@ -1263,11 +1264,17 @@ function renderDashboard() {
     }
   }
 
-  // Determine whose stats to show
-  const targetEmail = (isAdm && selectedAgent) ? selectedAgent : (u?.email||'').toLowerCase();
+  // ── Team view vs individual view ─────────────────────────────────────────────
+  // Admins default to "All Team" (no agent selected = '' = team overview)
+  const showTeam   = (isAdm || isSup) && !selectedAgent;
+  const targetEmail = showTeam ? null : (selectedAgent || (u?.email||'').toLowerCase());
+
+  // Title
   const titleEl = document.getElementById('dash-page-title');
   if (titleEl) {
-    if (isAdm && selectedAgent) {
+    if (showTeam) {
+      titleEl.textContent = 'Team Dashboard';
+    } else if (selectedAgent && selectedAgent !== (u?.email||'').toLowerCase()) {
       const agentName = cachedData.find(r => r.agentEmail?.toLowerCase() === selectedAgent)?.agentName || selectedAgent;
       titleEl.textContent = `${agentName}'s Dashboard`;
     } else {
@@ -1275,76 +1282,120 @@ function renderDashboard() {
     }
   }
 
-  // Build a human-readable label for the date range
-  const isCurrentMonth = (fromDate === currentMonthStart() || !fromDate) && (toDate === currentMonthEnd() || !toDate);
   const rangeLabel = formatDateRangeLabel(fromDate, toDate);
 
-  // Calculate stats from cachedData for the selected date range + agent
-  const isCurrentRangeAndSelf = isCurrentMonth && !selectedAgent;
+  // ── Stats ────────────────────────────────────────────────────────────────────
   let s;
-  if (isCurrentRangeAndSelf && Object.keys(cachedMyStats).length) {
-    s = cachedMyStats;
-  } else {
-    const rangeRec = cachedData.filter(r =>
-      (r.agentEmail||'').toLowerCase() === targetEmail &&
-      inDateRange(r, fromDate, toDate)
-    );
-    const validCount   = rangeRec.filter(r => r.finalStatus === 'Valid').length;
+  if (showTeam) {
+    // Aggregate across the whole team for the selected period
+    const rangeRec     = cachedData.filter(r => inDateRange(r, fromDate, toDate));
+    const validRecs    = rangeRec.filter(r => r.finalStatus === 'Valid');
+    const validCount   = validRecs.length;
     const pendingCount = rangeRec.filter(r => r.finalStatus === 'Pending' || r.finalStatus === 'Pending Review').length;
-    const bonus        = calcBonusFromCount(validCount);
-    const rate         = validCount >= 10 ? 10 : validCount >= 5 ? 7 : validCount >= 1 ? 5 : 0;
-    s = { validCount, pendingCount, bonus, rate, tier: calcTierFromCount(validCount) };
+    const totalBonus   = validRecs.reduce((sum, r) => sum + (Number(r.bonusRate) || Number(r.bonusAmount) || 0), 0);
+    const activeAgents = new Set(validRecs.map(r => (r.agentEmail||'').toLowerCase()).filter(Boolean)).size;
+    s = { validCount, pendingCount, bonus: totalBonus, rate: activeAgents, isTeam: true };
+  } else {
+    const isCurrentMonth = (fromDate === currentMonthStart() || !fromDate) && (toDate === currentMonthEnd() || !toDate);
+    const isCurrentRangeAndSelf = isCurrentMonth && targetEmail === (u?.email||'').toLowerCase();
+    if (isCurrentRangeAndSelf && Object.keys(cachedMyStats).length) {
+      s = cachedMyStats;
+    } else {
+      const rangeRec   = cachedData.filter(r => (r.agentEmail||'').toLowerCase() === targetEmail && inDateRange(r, fromDate, toDate));
+      const validCount   = rangeRec.filter(r => r.finalStatus === 'Valid').length;
+      const pendingCount = rangeRec.filter(r => r.finalStatus === 'Pending' || r.finalStatus === 'Pending Review').length;
+      const bonus        = calcBonusFromCount(validCount);
+      const rate         = validCount >= 10 ? 10 : validCount >= 5 ? 7 : validCount >= 1 ? 5 : 0;
+      s = { validCount, pendingCount, bonus, rate, tier: calcTierFromCount(validCount) };
+    }
   }
 
-  document.getElementById('stat-valid').textContent      = s.validCount  ?? '0';
-  document.getElementById('stat-bonus').textContent      = s.bonus != null ? `$${s.bonus}` : '$0';
-  document.getElementById('stat-tier').textContent       = s.tier        || 'No bonus yet';
-  document.getElementById('stat-rate').textContent       = s.rate != null ? `$${s.rate}` : '$0';
-  document.getElementById('stat-pending').textContent    = s.pendingCount ?? '0';
+  // ── Stat card values + labels ────────────────────────────────────────────────
+  document.getElementById('stat-valid').textContent   = s.validCount  ?? '0';
+  document.getElementById('stat-bonus').textContent   = s.bonus != null ? `$${s.bonus}` : '$0';
+  document.getElementById('stat-pending').textContent = s.pendingCount ?? '0';
   document.getElementById('stat-month-label').textContent = rangeLabel;
   document.getElementById('dash-month-badge').textContent = rangeLabel;
 
-  // Next tier text
-  const valid = s.validCount || 0;
-  let nextTierTxt = '';
-  if (valid < 1)       nextTierTxt = '1 review to start earning!';
-  else if (valid < 5)  nextTierTxt = `${5 - valid} more to Tier 2 ($7/review)`;
-  else if (valid < 10) nextTierTxt = `${10 - valid} more to Tier 3 ($10/review)`;
-  else                 nextTierTxt = '🎉 Max tier reached!';
-  document.getElementById('stat-next-tier').textContent    = nextTierTxt;
-  document.getElementById('tier-next-label').textContent   = nextTierTxt;
-  document.getElementById('tier-progress-label').textContent = `${valid} valid review${valid !== 1 ? 's' : ''} in period`;
+  const tierCard = document.getElementById('dash-tier-card');
 
-  // Tier progress bar (cap at 10 for display)
-  const pct = Math.min((valid / 10) * 100, 100);
-  document.getElementById('tier-bar').style.width = pct + '%';
+  if (showTeam) {
+    // Relabel cards for team context
+    const vl = document.getElementById('stat-valid-label');  if (vl) vl.textContent = 'Team Valid Reviews';
+    const bl = document.getElementById('stat-bonus-label');  if (bl) bl.textContent = 'Total Bonus Pool';
+    const rl = document.getElementById('stat-rate-label');   if (rl) rl.textContent = 'Active Agents';
+    document.getElementById('stat-rate').textContent  = s.rate ?? '0';
+    document.getElementById('stat-tier').textContent  = 'Across all agents';
+    document.getElementById('stat-next-tier').textContent = '';
+    // Hide per-agent tier progress bar — not meaningful for a whole team
+    if (tierCard) tierCard.style.display = 'none';
+  } else {
+    // Restore individual labels
+    const vl = document.getElementById('stat-valid-label');  if (vl) vl.textContent = 'Valid Reviews';
+    const bl = document.getElementById('stat-bonus-label');  if (bl) bl.textContent = 'Bonus Earned';
+    const rl = document.getElementById('stat-rate-label');   if (rl) rl.textContent = 'Rate Per Review';
+    document.getElementById('stat-tier').textContent = s.tier || 'No bonus yet';
+    document.getElementById('stat-rate').textContent = s.rate != null ? `$${s.rate}` : '$0';
+    if (tierCard) tierCard.style.display = '';
 
-  // Active tier badge
-  ['t1','t2','t3'].forEach(t => document.getElementById('badge-' + t).classList.remove('active'));
-  if (valid >= 10)     document.getElementById('badge-t3').classList.add('active');
-  else if (valid >= 5) document.getElementById('badge-t2').classList.add('active');
-  else if (valid >= 1) document.getElementById('badge-t1').classList.add('active');
+    const valid = s.validCount || 0;
+    let nextTierTxt = '';
+    if (valid < 1)       nextTierTxt = '1 review to start earning!';
+    else if (valid < 5)  nextTierTxt = `${5 - valid} more to Tier 2 ($7/review)`;
+    else if (valid < 10) nextTierTxt = `${10 - valid} more to Tier 3 ($10/review)`;
+    else                 nextTierTxt = '🎉 Max tier reached!';
+    document.getElementById('stat-next-tier').textContent    = nextTierTxt;
+    document.getElementById('tier-next-label').textContent   = nextTierTxt;
+    document.getElementById('tier-progress-label').textContent = `${valid} valid review${valid !== 1 ? 's' : ''} in period`;
+    document.getElementById('tier-bar').style.width = Math.min((valid / 10) * 100, 100) + '%';
+    ['t1','t2','t3'].forEach(t => document.getElementById('badge-' + t).classList.remove('active'));
+    if (valid >= 10)     document.getElementById('badge-t3').classList.add('active');
+    else if (valid >= 5) document.getElementById('badge-t2').classList.add('active');
+    else if (valid >= 1) document.getElementById('badge-t1').classList.add('active');
+  }
 
-  // Charts
-  renderPlatformChart();
-  renderStatusChart();
+  // ── Charts — pass the right record set ──────────────────────────────────────
+  const chartRecords = showTeam
+    ? cachedData.filter(r => inDateRange(r, fromDate, toDate))
+    : cachedData.filter(r => (r.agentEmail||'').toLowerCase() === targetEmail && inDateRange(r, fromDate, toDate));
+  renderPlatformChart(chartRecords);
+  renderStatusChart(chartRecords);
 
-  // ── Specialist Ranking Card ──────────────────────────────────────────────────
+  // ── Ranking Card ─────────────────────────────────────────────────────────────
   const rankMonthLabel = document.getElementById('dash-rank-month-label');
   if (rankMonthLabel) rankMonthLabel.textContent = rangeLabel;
 
-  // Build leaderboard from cache for the selected date range
-  const lb = buildLeaderboardFromCacheRange(fromDate, toDate);
-  const myIdx = lb.findIndex(a => a.email === targetEmail);
+  const lb    = buildLeaderboardFromCacheRange(fromDate, toDate);
+  const myIdx = showTeam ? -1 : lb.findIndex(a => a.email === targetEmail);
   const myRank = myIdx >= 0 ? myIdx + 1 : null;
 
   const rankingBody = document.getElementById('dash-ranking-body');
+  const rankCardTitle = document.querySelector('#dash-ranking-card .card-title');
   if (rankingBody) {
     if (!lb.length) {
-      rankingBody.innerHTML = `<div class="empty-state"><div class="icon">🏅</div><p>No reviews found for ${formatMonthLabel(selectedMonth)}.</p></div>`;
+      if (rankCardTitle) rankCardTitle.innerHTML = `🏅 ${showTeam ? 'Team Ranking' : 'Your Ranking'} — <span style="color:#4F46E5">${rangeLabel}</span>`;
+      rankingBody.innerHTML = `<div class="empty-state"><div class="icon">🏅</div><p>No reviews submitted yet.</p></div>`;
+    } else if (showTeam) {
+      // Show the full team leaderboard
+      if (rankCardTitle) rankCardTitle.innerHTML = `🏅 Full Team Ranking — <span style="color:#4F46E5">${rangeLabel}</span>`;
+      const allRows = lb.map((a, i) => {
+        const rank = i + 1;
+        const rankIcon = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}`;
+        return `<div class="lb-row" style="font-size:.88rem;padding:.6rem .85rem">
+          <div style="font-size:1rem;font-weight:700;width:2rem;text-align:center;${rank<=3?'color:'+(rank===1?'#D97706':rank===2?'#64748B':'#92400E'):''}">${rankIcon}</div>
+          <div style="flex:1"><span style="font-weight:600">${escHtml(a.name)}</span></div>
+          <div style="display:flex;gap:.5rem;align-items:center">
+            <span class="badge badge-valid" style="font-size:.72rem">✅ ${a.valid}</span>
+            <strong style="color:#4F46E5;font-size:.9rem">$${a.bonus}</strong>
+            <span style="font-size:.72rem;color:#94A3B8">${escHtml(a.tier)}</span>
+          </div>
+        </div>`;
+      }).join('');
+      rankingBody.innerHTML = `<div>${allRows}</div>`;
     } else {
-      // Show rank headline for the viewed agent
-      const myEntry = myIdx >= 0 ? lb[myIdx] : null;
+      // Individual view — show rank headline + top 5 peers
+      if (rankCardTitle) rankCardTitle.innerHTML = `🏅 Your Ranking — <span style="color:#4F46E5">${rangeLabel}</span>`;
+      const myEntry  = myIdx >= 0 ? lb[myIdx] : null;
       const rankEmoji = myRank === 1 ? '🥇' : myRank === 2 ? '🥈' : myRank === 3 ? '🥉' : myRank ? `#${myRank}` : '—';
       const headlineHtml = myEntry ? `
         <div style="display:flex;align-items:center;gap:1rem;padding:.85rem 1rem;border-radius:.75rem;background:linear-gradient(135deg,#EEF2FF,#F5F3FF);border:1.5px solid #C7D2FE;margin-bottom:1rem">
@@ -1353,45 +1404,39 @@ function renderDashboard() {
             <div style="font-weight:700;font-size:1rem;color:#1E293B">${escHtml(myEntry.name)}</div>
             <div style="font-size:.82rem;color:#64748B">Ranked <strong style="color:#4F46E5">${myRank} of ${lb.length}</strong> specialists · ${myEntry.valid} valid review${myEntry.valid!==1?'s':''} · <strong style="color:#10B981">$${myEntry.bonus}</strong> bonus</div>
           </div>
-          <div style="text-align:right">
-            <div style="font-size:.78rem;color:#64748B">${escHtml(myEntry.tier)}</div>
-          </div>
-        </div>` : `<div style="padding:.5rem 0;font-size:.85rem;color:#94A3B8">No reviews submitted yet this month.</div>`;
+          <div style="text-align:right"><div style="font-size:.78rem;color:#64748B">${escHtml(myEntry.tier)}</div></div>
+        </div>` : `<div style="padding:.5rem 0;font-size:.85rem;color:#94A3B8">No reviews submitted yet.</div>`;
 
-      // Show top 5 peers around the agent's position
       const top5 = lb.slice(0, 5);
-      // If agent is outside top 5, ensure they appear
       if (myIdx >= 5 && myEntry) top5.push({ ...myEntry, _gap: myIdx > 5 });
-      const peerRows = top5.map((a, displayIdx) => {
-        const realRank  = lb.findIndex(x => x.email === a.email) + 1;
-        const isMe      = a.email === targetEmail;
-        const rankIcon  = realRank === 1 ? '🥇' : realRank === 2 ? '🥈' : realRank === 3 ? '🥉' : `${realRank}`;
-        const gapRow    = a._gap ? `<div style="text-align:center;color:#94A3B8;font-size:.78rem;padding:.25rem 0">· · ·</div>` : '';
+      const peerRows = top5.map(a => {
+        const realRank = lb.findIndex(x => x.email === a.email) + 1;
+        const isMe     = a.email === targetEmail;
+        const rankIcon = realRank === 1 ? '🥇' : realRank === 2 ? '🥈' : realRank === 3 ? '🥉' : `${realRank}`;
+        const gapRow   = a._gap ? `<div style="text-align:center;color:#94A3B8;font-size:.78rem;padding:.25rem 0">· · ·</div>` : '';
         return `${gapRow}
-          <div class="lb-row" style="${isMe ? 'background:#EEF2FF;border:1.5px solid #C7D2FE;' : ''}font-size:.88rem;padding:.6rem .85rem">
+          <div class="lb-row" style="${isMe?'background:#EEF2FF;border:1.5px solid #C7D2FE;':''}font-size:.88rem;padding:.6rem .85rem">
             <div style="font-size:1rem;font-weight:700;width:2rem;text-align:center;${realRank<=3?'color:'+(realRank===1?'#D97706':realRank===2?'#64748B':'#92400E'):''}">${rankIcon}</div>
-            <div style="flex:1">
-              <span style="font-weight:600">${escHtml(a.name)}</span>
-              ${isMe ? '<span style="color:#4F46E5;font-size:.72rem;margin-left:.35rem">(you)</span>' : ''}
-            </div>
+            <div style="flex:1"><span style="font-weight:600">${escHtml(a.name)}</span>${isMe?'<span style="color:#4F46E5;font-size:.72rem;margin-left:.35rem">(you)</span>':''}</div>
             <div style="display:flex;gap:.5rem;align-items:center">
               <span class="badge badge-valid" style="font-size:.72rem">✅ ${a.valid}</span>
               <strong style="color:#4F46E5;font-size:.9rem">$${a.bonus}</strong>
             </div>
           </div>`;
       }).join('');
-
       rankingBody.innerHTML = headlineHtml + `<div style="margin-top:.25rem">${peerRows}</div>`;
     }
   }
 }
 
-function renderPlatformChart() {
-  const u      = getUser();
-  const myRec  = cachedData.filter(r => (r.agentEmail||'').toLowerCase() === (u?.email||''));
+function renderPlatformChart(records) {
+  if (!records) {
+    const u = getUser();
+    records = cachedData.filter(r => (r.agentEmail||'').toLowerCase() === (u?.email||''));
+  }
   const counts = {};
   (cachedConfig.platforms || []).forEach(p => counts[p] = 0);
-  myRec.filter(r => r.finalStatus === 'Valid').forEach(r => { if (r.platform) counts[r.platform] = (counts[r.platform]||0) + 1; });
+  records.filter(r => r.finalStatus === 'Valid').forEach(r => { if (r.platform) counts[r.platform] = (counts[r.platform]||0) + 1; });
 
   const labels = Object.keys(counts);
   const values = Object.values(counts);
@@ -1408,13 +1453,15 @@ function renderPlatformChart() {
   });
 }
 
-function renderStatusChart() {
-  const u     = getUser();
-  const myRec = cachedData.filter(r => (r.agentEmail||'').toLowerCase() === (u?.email||''));
-  const valid       = myRec.filter(r => r.finalStatus === 'Valid').length;
-  const invalid     = myRec.filter(r => r.finalStatus === 'Invalid').length;
-  const pending     = myRec.filter(r => r.finalStatus === 'Pending').length;
-  const inReview    = myRec.filter(r => r.finalStatus === 'Pending Review').length;
+function renderStatusChart(records) {
+  if (!records) {
+    const u = getUser();
+    records = cachedData.filter(r => (r.agentEmail||'').toLowerCase() === (u?.email||''));
+  }
+  const valid    = records.filter(r => r.finalStatus === 'Valid').length;
+  const invalid  = records.filter(r => r.finalStatus === 'Invalid').length;
+  const pending  = records.filter(r => r.finalStatus === 'Pending').length;
+  const inReview = records.filter(r => r.finalStatus === 'Pending Review').length;
 
   if (statusChart) statusChart.destroy();
   const ctx = document.getElementById('chart-status').getContext('2d');
