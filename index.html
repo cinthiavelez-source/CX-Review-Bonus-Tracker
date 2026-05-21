@@ -31,6 +31,9 @@
 
     /* ── LAYOUT ── */
     .main { max-width: 1100px; margin: 0 auto; padding: 1.75rem 1.25rem; }
+    .main.wide { max-width: 1500px; }
+    #page-allreviews table th { padding: .45rem .6rem; font-size: .7rem; }
+    #page-allreviews table td { padding: .5rem .6rem; font-size: .77rem; }
     .page { display: none; opacity: 0; }
     .page.active { display: block; animation: pageIn 0.12s ease forwards; }
     @keyframes pageIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
@@ -279,11 +282,17 @@
         <select id="dash-filter-agent" onchange="renderDashboard()" style="display:none">
           <option value="">My Stats</option>
         </select>
-        <span class="filter-label" style="font-size:.78rem">From:</span>
-        <input type="date" id="dash-from-date" onchange="renderDashboard()" style="font-size:.82rem" />
-        <span class="filter-label" style="font-size:.78rem">To:</span>
-        <input type="date" id="dash-to-date" onchange="renderDashboard()" style="font-size:.82rem" />
-        <button class="btn btn-secondary btn-sm" onclick="clearDashboardFilters()">Clear</button>
+        <select id="dash-period" onchange="dashPeriodChange()" style="font-size:.82rem;border:1.5px solid #E2E8F0;border-radius:.5rem;padding:.35rem .6rem;color:#475569;background:white">
+          <option value="month">This Month</option>
+          <option value="3months">Last 3 Months</option>
+          <option value="all">All Time</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        <span class="filter-label" style="font-size:.78rem" id="dash-from-label">From:</span>
+        <input type="date" id="dash-from-date" onchange="setDashPeriodCustom();renderDashboard()" style="font-size:.82rem" />
+        <span class="filter-label" style="font-size:.78rem" id="dash-to-label">To:</span>
+        <input type="date" id="dash-to-date" onchange="setDashPeriodCustom();renderDashboard()" style="font-size:.82rem" />
+        <button class="btn btn-secondary btn-sm" onclick="clearDashboardFilters()">This Month</button>
       </div>
     </div>
 
@@ -507,6 +516,7 @@
             <th>Code</th>
             <th>Reg. Date</th>
             <th>Review Date</th>
+            <th>Ticket</th>
             <th>Platform</th>
             <th>Customer</th>
             <th>Agent</th>
@@ -1215,6 +1225,9 @@ function navTo(page) {
   document.querySelectorAll('.nav-btn[data-page]').forEach(b => {
     b.classList.toggle('active', b.dataset.page === page);
   });
+  // Widen main container for All Reviews so all columns fit without horizontal scroll
+  const mainEl = document.getElementById('main-content');
+  if (mainEl) mainEl.classList.toggle('wide', page === 'allreviews');
   renderPage(page);
 }
 
@@ -1786,7 +1799,7 @@ function renderAllReviews() {
 
   const tbody = document.getElementById('allreviews-body');
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
     return;
   }
 
@@ -1795,6 +1808,7 @@ function renderAllReviews() {
       <td><code style="font-size:.78rem;background:#EEF2FF;color:#4F46E5;padding:.2rem .4rem;border-radius:.3rem;font-weight:600">${escHtml(r.reviewCode||'—')}</code></td>
       <td style="font-size:.8rem;color:#64748B">${r.registrationDate ? formatDate(r.registrationDate) : formatDate(r.submittedAt)}</td>
       <td style="font-size:.8rem;color:#64748B">${r.reviewDate ? formatDate(r.reviewDate) : '—'}</td>
+      <td><code style="font-size:.75rem;background:#F1F5F9;color:#475569;padding:.15rem .35rem;border-radius:.3rem">${escHtml(r.ticketId||'—')}</code></td>
       <td>${escHtml(r.platform||'—')}</td>
       <td>${escHtml(r.customerName||'—')}</td>
       <td style="font-size:.82rem">
@@ -1945,13 +1959,61 @@ function clearLeaderboardFilters() {
   renderLeaderboard();
 }
 
+function dashPeriodChange() {
+  const period = document.getElementById('dash-period')?.value;
+  const fromEl = document.getElementById('dash-from-date');
+  const toEl   = document.getElementById('dash-to-date');
+  const fromLbl = document.getElementById('dash-from-label');
+  const toLbl   = document.getElementById('dash-to-label');
+  const now = new Date();
+  if (period === 'month') {
+    if (fromEl) fromEl.value = currentMonthStart();
+    if (toEl)   toEl.value   = currentMonthEnd();
+    if (fromEl) fromEl.style.display = '';
+    if (toEl)   toEl.style.display   = '';
+    if (fromLbl) fromLbl.style.display = '';
+    if (toLbl)   toLbl.style.display   = '';
+  } else if (period === '3months') {
+    const d = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+    if (fromEl) fromEl.value = d.toISOString().split('T')[0];
+    if (toEl)   toEl.value   = currentMonthEnd();
+    if (fromEl) fromEl.style.display = '';
+    if (toEl)   toEl.style.display   = '';
+    if (fromLbl) fromLbl.style.display = '';
+    if (toLbl)   toLbl.style.display   = '';
+  } else if (period === 'all') {
+    if (fromEl) { fromEl.value = ''; fromEl.style.display = 'none'; }
+    if (toEl)   { toEl.value   = ''; toEl.style.display   = 'none'; }
+    if (fromLbl) fromLbl.style.display = 'none';
+    if (toLbl)   toLbl.style.display   = 'none';
+  } else if (period === 'custom') {
+    if (fromEl) fromEl.style.display = '';
+    if (toEl)   toEl.style.display   = '';
+    if (fromLbl) fromLbl.style.display = '';
+    if (toLbl)   toLbl.style.display   = '';
+  }
+  renderDashboard();
+}
+
+function setDashPeriodCustom() {
+  // When user manually edits dates, switch period selector to "Custom"
+  const periodEl = document.getElementById('dash-period');
+  if (periodEl && periodEl.value !== 'custom') periodEl.value = 'custom';
+}
+
 function clearDashboardFilters() {
   const fe = document.getElementById('dash-from-date');
   const te = document.getElementById('dash-to-date');
-  if (fe) fe.value = currentMonthStart();
-  if (te) te.value = currentMonthEnd();
+  if (fe) { fe.value = currentMonthStart(); fe.style.display = ''; }
+  if (te) { te.value = currentMonthEnd();   te.style.display = ''; }
   const a = document.getElementById('dash-filter-agent');
   if (a) a.value = '';
+  const p = document.getElementById('dash-period');
+  if (p) p.value = 'month';
+  const fromLbl = document.getElementById('dash-from-label');
+  const toLbl   = document.getElementById('dash-to-label');
+  if (fromLbl) fromLbl.style.display = '';
+  if (toLbl)   toLbl.style.display   = '';
   renderDashboard();
 }
 
