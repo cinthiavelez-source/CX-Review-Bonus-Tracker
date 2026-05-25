@@ -94,10 +94,11 @@
 
     /* ── STATUS BADGES ── */
     .badge { display: inline-flex; align-items: center; gap: .3rem; padding: .25rem .7rem; border-radius: 9999px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
-    .badge-valid   { background: #D1FAE5; color: #065F46; }
-    .badge-invalid { background: #FEE2E2; color: #991B1B; }
-    .badge-pending { background: #FEF3C7; color: #92400E; }
-    .badge-error   { background: #F1F5F9; color: #64748B; }
+    .badge-valid    { background: #D1FAE5; color: #065F46; }
+    .badge-invalid  { background: #FEE2E2; color: #991B1B; }
+    .badge-rejected { background: #4C0519; color: #FECDD3; }
+    .badge-pending  { background: #FEF3C7; color: #92400E; }
+    .badge-error    { background: #F1F5F9; color: #64748B; }
     .badge-spin { animation: spin .8s linear infinite; display: inline-block; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -448,6 +449,7 @@
           <option value="">All Statuses</option>
           <option value="Valid">Valid ✅</option>
           <option value="Invalid">Invalid ❌</option>
+          <option value="Rejected">Rejected 🚫</option>
           <option value="Pending">Pending ⏳</option>
           <option value="Pending Review">👀 Pending Supervisor Review</option>
           <option value="Flagged">🚩 Flagged (Duplicate)</option>
@@ -500,6 +502,7 @@
           <option value="">All Statuses</option>
           <option value="Valid">Valid ✅</option>
           <option value="Invalid">Invalid ❌</option>
+          <option value="Rejected">Rejected 🚫</option>
           <option value="Pending">Pending ⏳</option>
           <option value="Pending Review">👀 Pending Review</option>
         </select>
@@ -646,7 +649,7 @@
         <span id="review-queue-badge" style="background:#7C3AED;color:white;padding:.2rem .75rem;border-radius:9999px;font-size:.78rem;font-weight:700;display:none"></span>
       </div>
       <p style="font-size:.83rem;color:#64748B;margin-bottom:1rem">
-        These submissions were flagged as potential duplicates. Review the details and the conflicting record side by side, then approve or reject. Approved submissions continue to AI validation; rejected ones are marked Invalid.
+        These submissions were flagged as potential duplicates. Review the details and the conflicting record side by side, then approve or reject. Approved submissions continue to AI validation; rejected ones are closed as Rejected.
       </p>
       <div id="review-queue-list">
         <div class="empty-state"><div class="icon">✅</div><p>No submissions pending review.</p></div>
@@ -833,6 +836,8 @@
       <select id="override-status">
         <option value="Valid">Valid ✅</option>
         <option value="Invalid">Invalid ❌</option>
+        <option value="Rejected">Rejected 🚫</option>
+        <option value="Pending">Pending ⏳</option>
       </select>
     </div>
     <div class="form-group">
@@ -1460,6 +1465,7 @@ function renderStatusChart(records) {
   }
   const valid    = records.filter(r => r.finalStatus === 'Valid').length;
   const invalid  = records.filter(r => r.finalStatus === 'Invalid').length;
+  const rejected = records.filter(r => r.finalStatus === 'Rejected').length;
   const pending  = records.filter(r => r.finalStatus === 'Pending').length;
   const inReview = records.filter(r => r.finalStatus === 'Pending Review').length;
 
@@ -1468,8 +1474,8 @@ function renderStatusChart(records) {
   statusChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: ['Valid','Invalid','Pending','Pending Review'],
-      datasets: [{ data: [valid, invalid, pending, inReview], backgroundColor: ['#10B981','#EF4444','#F59E0B','#7C3AED'], borderWidth: 0 }]
+      labels: ['Valid','Invalid','Rejected','Pending','Pending Review'],
+      datasets: [{ data: [valid, invalid, rejected, pending, inReview], backgroundColor: ['#10B981','#EF4444','#4C0519','#F59E0B','#7C3AED'], borderWidth: 0 }]
     },
     options: { plugins: { legend: { position: 'bottom' } }, responsive: true, maintainAspectRatio: true, cutout: '65%' }
   });
@@ -1673,7 +1679,7 @@ function renderReviews() {
         <div class="inline-actions">
           ${r.reviewUrl ? `<a href="${escHtml(r.reviewUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View live review">🔗</a>` : ''}
           ${r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View screenshot">📸</a>` : ''}
-          ${(isAdm || isSup) && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending') ? `
+          ${(isAdm || isSup) && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending' || r.finalStatus === 'Rejected') ? `
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" title="Override to Valid" onclick="quickMarkValid('${r.id}','${escHtml(r.agentName||r.agentEmail||'')}','${escHtml(r.platform||'')}')">✅ Mark Valid</button>
           ` : ''}
           ${isAdm ? `
@@ -1876,7 +1882,7 @@ function renderAllReviews() {
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','approve')">✅ Approve</button>
             <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','reject')">❌ Reject</button>
           ` : ''}
-          ${(!isAgent && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending')) ? `
+          ${(!isAgent && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending' || r.finalStatus === 'Rejected')) ? `
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" title="Override to Valid" onclick="quickMarkValid('${r.id}','${escHtml(r.agentName||r.agentEmail||'')}','${escHtml(r.platform||'')}')">✅ Mark Valid</button>
           ` : ''}
           ${isAdm ? `
@@ -2533,7 +2539,7 @@ async function supervisorDecision(id, decision) {
     showToast(
       decision === 'approve'
         ? '✅ Approved! AI validation will run now.'
-        : '❌ Rejected and marked Invalid.',
+        : '🚫 Submission rejected and closed.',
       decision === 'approve' ? '#10B981' : '#EF4444'
     );
     await apiFetch();       // refresh data
@@ -3046,9 +3052,10 @@ function updateRoleUI() {
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 function statusBadge(status) {
-  if (status === 'Valid')   return '<span class="badge badge-valid">✅ Valid</span>';
-  if (status === 'Invalid') return '<span class="badge badge-invalid">❌ Invalid</span>';
-  if (status === 'Pending') return '<span class="badge badge-pending"><span class="badge-spin">⏳</span> Pending</span>';
+  if (status === 'Valid')          return '<span class="badge badge-valid">✅ Valid</span>';
+  if (status === 'Invalid')        return '<span class="badge badge-invalid">❌ Invalid</span>';
+  if (status === 'Rejected')       return '<span class="badge badge-rejected">🚫 Rejected</span>';
+  if (status === 'Pending')        return '<span class="badge badge-pending"><span class="badge-spin">⏳</span> Pending</span>';
   if (status === 'Flagged')        return '<span class="badge" style="background:#EDE9FE;color:#5B21B6">🚩 Flagged</span>';
   if (status === 'Pending Review') return '<span class="badge" style="background:#EDE9FE;color:#5B21B6">👀 Pending Review</span>';
   return `<span class="badge badge-error">${escHtml(status||'—')}</span>`;
