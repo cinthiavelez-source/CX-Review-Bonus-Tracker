@@ -392,7 +392,7 @@
           <div class="form-group">
             <label>Review Date *</label>
             <input type="date" id="f-reviewDate" required />
-            <span class="hint">The date the customer posted this review</span>
+            <span class="hint">The date the customer posted this review — cannot be a future date</span>
           </div>
           <div class="form-group">
             <label>Registration Date</label>
@@ -1112,8 +1112,12 @@ async function initApp() {
   setDefaultDateFilters();
   updateRoleUI();
   // Pre-fill registration date (today) — read-only field auto-stamped on load
+  const today = new Date().toISOString().split('T')[0];
   const regField = document.getElementById('f-registrationDate');
-  if (regField) regField.value = new Date().toISOString().split('T')[0];
+  if (regField) regField.value = today;
+  // Cap the review date picker to today — same-day is valid, future dates are not
+  const reviewDateField = document.getElementById('f-reviewDate');
+  if (reviewDateField) reviewDateField.max = today;
 
   // ── Fast path: paint from localStorage cache immediately ─────────────────────
   const hasCached = loadDataCache();
@@ -1533,6 +1537,14 @@ async function submitReview(e) {
   const platform  = document.getElementById('f-platform').value;
   if (!ticketId || !platform) {
     showToast('Please fill in all required fields.', '#EF4444');
+    return;
+  }
+
+  // Review date must not be in the future — same day as submission is perfectly valid
+  const reviewDateVal = document.getElementById('f-reviewDate').value;
+  const todayStr      = new Date().toISOString().split('T')[0];
+  if (reviewDateVal && reviewDateVal > todayStr) {
+    showToast('⚠️ Review date cannot be a future date. Same-day submissions are allowed.', '#F59E0B');
     return;
   }
 
