@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-26-b -->
+<!-- v2026-05-26-c -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -526,6 +526,7 @@
             <th>Agent</th>
             <th>Supervisor</th>
             <th>Status</th>
+            <th>Reason</th>
             <th>Flag</th>
             <th>Bonus</th>
             <th>Actions</th>
@@ -1683,7 +1684,7 @@ function renderReviews() {
       <td>${escHtml(r.platform||'—')}</td>
       <td>${escHtml(r.customerName||'—')}</td>
       <td>${statusBadge(r.finalStatus)}</td>
-      <td class="ai-notes-cell" title="${escHtml(r.aiNotes||'')}">${escHtml(r.aiNotes||'—')}</td>
+      <td class="ai-notes-cell" title="${escHtml(r.aiNotes||r.duplicateFlag||'')}" style="font-size:.78rem;color:${r.finalStatus==='Valid'?'#94A3B8':r.finalStatus==='Rejected'?'#991B1B':r.finalStatus==='Invalid'?'#92400E':'#5B21B6'}">${escHtml(reasonText(r))}</td>
       <td>${r.finalStatus === 'Valid' ? `<strong style="color:#10B981">$${r.bonusRate||0}</strong>` : '—'}</td>
       ${isAdm ? `<td style="font-size:.8rem;color:#64748B">${escHtml(r.agentName||r.agentEmail||'—')}</td>` : ''}
       ${isAdm ? `<td style="font-size:.75rem;color:${r.duplicateFlag?'#7C3AED':'#94A3B8'};max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(r.duplicateFlag||'')}">${r.duplicateFlag ? '🚩 ' + escHtml(safeStr(r.duplicateFlag).split(':')[0]) : '—'}</td>` : ''}
@@ -1867,7 +1868,7 @@ function renderAllReviews() {
 
   const tbody = document.getElementById('allreviews-body');
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
     return;
   }
 
@@ -1888,6 +1889,7 @@ function renderAllReviews() {
         <div style="color:#94A3B8;font-size:.75rem">${escHtml(r.supervisorEmail||'')}</div>
       </td>
       <td>${statusBadge(r.finalStatus)}</td>
+      <td style="font-size:.75rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${r.finalStatus==='Valid'?'#94A3B8':r.finalStatus==='Rejected'?'#991B1B':r.finalStatus==='Invalid'?'#92400E':'#5B21B6'}" title="${escHtml(reasonText(r))}">${r.finalStatus!=='Valid'?escHtml(reasonText(r)):'—'}</td>
       <td style="font-size:.75rem;color:${r.duplicateFlag?'#7C3AED':'#94A3B8'};max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(r.duplicateFlag||'')}">${r.duplicateFlag ? '🚩 ' + escHtml(safeStr(r.duplicateFlag).split(':')[0]) : '—'}</td>
       <td>${r.finalStatus === 'Valid' ? `<strong style="color:#10B981">$${r.bonusRate||0}</strong>` : '—'}</td>
       <td>
@@ -3077,6 +3079,41 @@ function statusBadge(status) {
   if (status === 'Flagged')        return '<span class="badge" style="background:#EDE9FE;color:#5B21B6">🚩 Flagged</span>';
   if (status === 'Pending Review') return '<span class="badge" style="background:#EDE9FE;color:#5B21B6">👀 Pending Review</span>';
   return `<span class="badge badge-error">${escHtml(status||'—')}</span>`;
+}
+
+// Returns a human-readable reason why a review is not Valid.
+// Sources: aiNotes (Invalid/Rejected), duplicateFlag (Pending Review), static label otherwise.
+function reasonText(r) {
+  const status = r.finalStatus || '';
+  if (status === 'Valid') return '—';
+  if (status === 'Pending') return '⏳ Awaiting AI validation';
+  if (status === 'Pending Review') {
+    if (!r.duplicateFlag) return '⏳ Awaiting supervisor review';
+    // duplicateFlag format: "REASON_CODE: human message"
+    const colonIdx = safeStr(r.duplicateFlag).indexOf(': ');
+    return colonIdx > -1 ? r.duplicateFlag.slice(colonIdx + 2) : r.duplicateFlag;
+  }
+  if (status === 'Rejected') {
+    if (!r.aiNotes) return '🚫 Rejected by supervisor';
+    // Audit trail segments are separated by ' | '; find the last "Rejected by" entry
+    const segments = safeStr(r.aiNotes).split(' | ');
+    const rejSeg = [...segments].reverse().find(s => s.toLowerCase().includes('rejected by'));
+    if (rejSeg) {
+      // Format: "Rejected by email@... on DATE: NOTE"
+      const colonIdx = rejSeg.indexOf(':');
+      const note = colonIdx > -1 ? rejSeg.slice(colonIdx + 1).trim() : '';
+      return note || '🚫 Rejected by supervisor';
+    }
+    // Fall back to first segment
+    return segments[0].trim() || '🚫 Rejected by supervisor';
+  }
+  if (status === 'Invalid') {
+    if (!r.aiNotes) return '❌ Validation failed';
+    // First segment before ' | ' is the AI reason
+    return safeStr(r.aiNotes).split(' | ')[0].trim() || '❌ Validation failed';
+  }
+  // Fallback for any other status
+  return r.aiNotes ? safeStr(r.aiNotes).split(' | ')[0].trim() : '—';
 }
 
 function formatDate(iso) {
