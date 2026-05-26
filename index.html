@@ -836,7 +836,6 @@
       <select id="override-status">
         <option value="Valid">Valid ✅</option>
         <option value="Invalid">Invalid ❌</option>
-        <option value="Rejected">Rejected 🚫</option>
         <option value="Pending">Pending ⏳</option>
       </select>
     </div>
@@ -1691,12 +1690,15 @@ function renderReviews() {
         <div class="inline-actions">
           ${r.reviewUrl ? `<a href="${escHtml(r.reviewUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View live review">🔗</a>` : ''}
           ${r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View screenshot">📸</a>` : ''}
-          ${(isAdm || isSup) && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending' || r.finalStatus === 'Rejected') ? `
+          ${(isAdm || isSup) && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending') ? `
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" title="Override to Valid" onclick="quickMarkValid('${r.id}','${escHtml(r.agentName||r.agentEmail||'')}','${escHtml(r.platform||'')}')">✅ Mark Valid</button>
           ` : ''}
-          ${isAdm ? `
+          ${isAdm && r.finalStatus !== 'Rejected' ? `
             <button class="btn btn-secondary btn-icon" title="Re-run AI validation" onclick="revalidate('${r.id}','${escHtml(r.screenshotDriveUrl||'')}','${escHtml(r.platform||'')}')">🔄</button>
             <button class="btn btn-secondary btn-icon" title="Manual override" onclick="openOverrideModal('${r.id}')">⚙️</button>
+            <button class="btn btn-danger btn-icon" title="Delete" onclick="deleteReview('${r.id}')">🗑️</button>
+          ` : ''}
+          ${isAdm && r.finalStatus === 'Rejected' ? `
             <button class="btn btn-danger btn-icon" title="Delete" onclick="deleteReview('${r.id}')">🗑️</button>
           ` : ''}
         </div>
@@ -1894,11 +1896,14 @@ function renderAllReviews() {
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','approve')">✅ Approve</button>
             <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','reject')">❌ Reject</button>
           ` : ''}
-          ${(!isAgent && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending' || r.finalStatus === 'Rejected')) ? `
+          ${(!isAgent && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending')) ? `
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" title="Override to Valid" onclick="quickMarkValid('${r.id}','${escHtml(r.agentName||r.agentEmail||'')}','${escHtml(r.platform||'')}')">✅ Mark Valid</button>
           ` : ''}
-          ${isAdm ? `
+          ${isAdm && r.finalStatus !== 'Rejected' ? `
             <button class="btn btn-secondary btn-icon" title="Manual override (any status)" onclick="openOverrideModal('${r.id}')">⚙️</button>
+            <button class="btn btn-danger btn-icon" title="Delete" onclick="deleteReview('${r.id}')">🗑️</button>
+          ` : ''}
+          ${isAdm && r.finalStatus === 'Rejected' ? `
             <button class="btn btn-danger btn-icon" title="Delete" onclick="deleteReview('${r.id}')">🗑️</button>
           ` : ''}
         </div>
