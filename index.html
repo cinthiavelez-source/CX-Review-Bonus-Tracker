@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-c -->
+<!-- v2026-05-27-e -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -2149,6 +2149,9 @@ async function generatePayout() {
     renderPayoutTable(data.payouts, data.grandTotal, month);
     showToast(`✅ Payout report generated for ${formatMonthLabel(month)}`, '#10B981');
     logAudit('GENERATE_PAYOUT', `Generated payout report for ${formatMonthLabel(month)} — ${data.payouts?.length || 0} agents, total $${data.grandTotal || 0}`);
+    // Bust the MoM cache so the history table always reflects the just-generated data
+    cachedAllPayouts   = [];
+    cachedAllPayoutsAt = 0;
     loadAllPayoutHistory();
   } catch (err) {
     showToast('Error: ' + err.message, '#EF4444');
