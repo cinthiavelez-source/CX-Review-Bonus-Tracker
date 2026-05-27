@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-26-c -->
+<!-- v2026-05-27-a -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -606,7 +606,7 @@
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>#</th><th>Agent</th><th>Valid Reviews</th><th>Tier</th><th>Rate/Review</th><th>Total Bonus</th><th>Payment Status</th><th>Action</th>
+            <th>#</th><th>Agent</th><th>Rippling ID</th><th>Valid Reviews</th><th>Tier</th><th>Rate/Review</th><th>Total Bonus</th><th>Payment Status</th><th>Action</th>
           </tr></thead>
           <tbody id="payout-body"></tbody>
         </table>
@@ -631,7 +631,7 @@
         <div class="table-wrap">
           <table>
             <thead><tr>
-              <th>Month</th><th>Agent</th><th>Valid Reviews</th><th>Tier</th><th>Total Bonus</th><th>Payment Status</th><th>Paid Date</th><th>Paid By</th>
+              <th>Month</th><th>Agent</th><th>Rippling ID</th><th>Valid Reviews</th><th>Tier</th><th>Total Bonus</th><th>Payment Status</th><th>Paid Date</th><th>Paid By</th>
             </tr></thead>
             <tbody id="mom-body"></tbody>
           </table>
@@ -2190,6 +2190,7 @@ function normalizePayoutRows(rows) {
   return rows.map(p => ({
     agentEmail: p.agentEmail  || '',
     agentName:  p.agentName   || p.agentEmail || '',
+    ripplingId: p.ripplingId  || '',
     count:      p.validReviewCount ?? p.count ?? 0,
     tier:       p.bonusTier   || p.tier  || '',
     rate:       p.ratePerReview ?? p.rate ?? 0,
@@ -2249,6 +2250,11 @@ function renderPayoutRows(normalized, grandTotal, month) {
       <td>
         <div style="font-weight:600">${escHtml(p.agentName)}</div>
         <div style="font-size:.75rem;color:#94A3B8">${escHtml(p.agentEmail)}</div>
+      </td>
+      <td>
+        ${p.ripplingId
+          ? `<code style="font-size:.78rem;background:#EFF6FF;color:#1D4ED8;padding:.15rem .4rem;border-radius:.3rem;font-weight:600">${escHtml(p.ripplingId)}</code>`
+          : `<span style="color:#CBD5E1;font-size:.78rem">—</span>`}
       </td>
       <td><strong>${p.count}</strong></td>
       <td><span class="badge" style="background:#EEF2FF;color:#4F46E5">${escHtml(p.tier)}</span></td>
@@ -2348,6 +2354,7 @@ function renderMoMTable(rows) {
         <div style="font-weight:600">${escHtml(p.agentName)}</div>
         <div style="font-size:.75rem;color:#94A3B8">${escHtml(p.agentEmail)}</div>
       </td>
+      <td>${p.ripplingId ? `<code style="font-size:.75rem;background:#EFF6FF;color:#1D4ED8;padding:.15rem .35rem;border-radius:.3rem">${escHtml(p.ripplingId)}</code>` : '—'}</td>
       <td>${p.count}</td>
       <td><span class="badge" style="background:#EEF2FF;color:#4F46E5;font-size:.72rem">${escHtml(p.tier)}</span></td>
       <td><strong style="color:#10B981">$${p.total}</strong></td>
@@ -2388,7 +2395,7 @@ function exportPayoutsCSV() {
     return;
   }
 
-  const headers = ['Month','Agent Name','Agent Email','Valid Reviews','Tier','Rate Per Review','Total Bonus','Payment Status','Paid Date','Paid By'];
+  const headers = ['Month','Agent Name','Agent Email','Rippling ID','Valid Reviews','Tier','Rate Per Review','Total Bonus','Payment Status','Paid Date','Paid By'];
   const csvRows = [headers.join(',')];
 
   const sorted = [...rows].sort((a, b) => (a.month||'').localeCompare(b.month||''));
@@ -2397,6 +2404,7 @@ function exportPayoutsCSV() {
       r.month       || '',
       `"${(r.agentName  || '').replace(/"/g,'""')}"`,
       r.agentEmail  || '',
+      r.ripplingId  || '',
       r.count       || 0,
       `"${(r.tier || '').replace(/"/g,'""')}"`,
       r.rate        || 0,
