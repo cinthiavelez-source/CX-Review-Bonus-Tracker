@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-e -->
+<!-- v2026-05-27-g -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -588,6 +588,7 @@
         <input type="month" id="payout-month" onchange="renderPayoutEmpty()" />
         <button id="payout-generate-btn" class="btn btn-primary btn-sm" onclick="generatePayout()">Generate Report</button>
         <button id="payout-load-saved-btn" class="btn btn-secondary btn-sm" onclick="loadPayoutData()">Load Saved</button>
+        <button id="payout-export-btn" class="btn btn-secondary btn-sm" onclick="exportMonthlyPayoutCSV()" style="display:none">⬇️ Export CSV</button>
         <div id="payout-agent-filter-wrap" style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
           <label style="font-size:.83rem;color:#64748B;white-space:nowrap">Filter agent:</label>
           <input type="text" id="payout-filter-agent" placeholder="Type name…" oninput="filterPayoutTable()" style="padding:.35rem .6rem;border:1px solid #E2E8F0;border-radius:.4rem;font-size:.83rem;width:160px" />
@@ -2225,6 +2226,8 @@ function renderPayoutTable(rows, grandTotal, month) {
     document.getElementById('payout-empty').style.display = '';
     document.getElementById('payout-total-banner').style.display = 'none';
     document.getElementById('payout-body').innerHTML = '';
+    const exportBtn = document.getElementById('payout-export-btn');
+    if (exportBtn) exportBtn.style.display = 'none';
     showToast('No valid reviews found for this month.', '#F59E0B');
     return;
   }
@@ -2234,6 +2237,10 @@ function renderPayoutTable(rows, grandTotal, month) {
   document.getElementById('payout-grand-total').textContent    = `$${grandTotal}`;
   document.getElementById('payout-month-label').textContent    = formatMonthLabel(month);
   document.getElementById('payout-agent-count').textContent    = `${normalized.length} agent${normalized.length !== 1 ? 's' : ''}`;
+
+  // Show the CSV export button now that we have data
+  const exportBtn = document.getElementById('payout-export-btn');
+  if (exportBtn) exportBtn.style.display = '';
 
   renderPayoutRows(normalized, grandTotal, month);
 }
@@ -2275,6 +2282,45 @@ function renderPayoutRows(normalized, grandTotal, month) {
       </td>
     </tr>`;
   }).join('');
+}
+
+// Export the current monthly payout report as a CSV file
+function exportMonthlyPayoutCSV() {
+  if (!cachedPayoutRows.length) {
+    showToast('No data to export. Generate or load a report first.', '#F59E0B');
+    return;
+  }
+  const month = cachedPayoutMonth || currentMonthStr();
+  const headers = ['Month', 'Agent Name', 'Agent Email', 'Rippling ID', 'Valid Reviews', 'Bonus Tier', 'Rate Per Review', 'Total Bonus', 'Payment Status', 'Paid Date', 'Paid By'];
+  const escCsv = (v) => {
+    const s = String(v ?? '');
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const dataRows = cachedPayoutRows.map(p => [
+    month,
+    p.agentName,
+    p.agentEmail,
+    p.ripplingId || '',
+    p.count,
+    p.tier,
+    `$${p.rate}`,
+    `$${p.total}`,
+    p.paidStatus || 'Unpaid',
+    p.paidDate || '',
+    p.paidBy || ''
+  ].map(escCsv).join(','));
+
+  const csv = [headers.map(escCsv).join(','), ...dataRows].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `CX_Payout_${month}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`✅ CSV exported: CX_Payout_${month}.csv`, '#10B981');
 }
 
 // Toggle payment status for a single agent in the current month view
