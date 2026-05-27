@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-b -->
+<!-- v2026-05-27-c -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -372,8 +372,8 @@
         <div class="form-grid">
           <div class="form-group">
             <label>Zendesk Ticket ID *</label>
-            <input type="text" id="f-ticketId" placeholder="e.g. #12345" required />
-            <span class="hint">The ticket number from your resolved conversation</span>
+            <input type="text" id="f-ticketId" placeholder="e.g. 12345" required inputmode="numeric" pattern="[0-9]+" title="Numbers only — no # or spaces" oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+            <span class="hint">Numbers only — no # symbol needed</span>
           </div>
           <div class="form-group">
             <label>Review Platform *</label>
