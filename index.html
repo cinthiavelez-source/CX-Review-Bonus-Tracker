@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-l -->
+<!-- v2026-05-27-m -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -43,16 +43,17 @@
     #page-allreviews table th { padding: .38rem .45rem; font-size: .63rem; white-space: nowrap; }
     #page-allreviews table td { padding: .4rem .45rem; font-size: .74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
     #page-allreviews tbody tr { height: 38px; max-height: 38px; }
-    /* Column widths */
-    #page-allreviews col.c-date   { width: 82px; }
-    #page-allreviews col.c-ticket { width: 70px; }
-    #page-allreviews col.c-plat   { width: 90px; }
-    #page-allreviews col.c-cust   { width: 100px; }
-    #page-allreviews col.c-agent  { width: 130px; }
-    #page-allreviews col.c-sup    { width: 120px; }
-    #page-allreviews col.c-status { width: 110px; }
-    #page-allreviews col.c-reason { width: 160px; }
-    #page-allreviews col.c-act    { width: 130px; }
+    /* Column widths — 10 cols */
+    #page-allreviews col.c-code   { width: 64px; }
+    #page-allreviews col.c-date   { width: 78px; }
+    #page-allreviews col.c-ticket { width: 68px; }
+    #page-allreviews col.c-plat   { width: 88px; }
+    #page-allreviews col.c-cust   { width: 96px; }
+    #page-allreviews col.c-agent  { width: 126px; }
+    #page-allreviews col.c-sup    { width: 116px; }
+    #page-allreviews col.c-status { width: 106px; }
+    #page-allreviews col.c-reason { width: 1fr; }
+    #page-allreviews col.c-act    { width: 126px; }
     /* Action menu */
     .ar-act-wrap { display: inline-flex; align-items: center; gap: .2rem; position: relative; }
     .ar-act-menu { display: none; position: absolute; right: 0; top: calc(100% + 3px); z-index: 300; background: white; border: 1.5px solid #E5E7EB; border-radius: .6rem; box-shadow: 0 6px 24px rgba(0,0,0,.13); padding: .35rem; min-width: 140px; flex-direction: column; gap: .2rem; }
@@ -566,10 +567,11 @@
       <div class="table-wrap">
         <table>
           <colgroup>
-            <col class="c-date"><col class="c-ticket"><col class="c-plat"><col class="c-cust">
+            <col class="c-code"><col class="c-date"><col class="c-ticket"><col class="c-plat"><col class="c-cust">
             <col class="c-agent"><col class="c-sup"><col class="c-status"><col class="c-reason"><col class="c-act">
           </colgroup>
           <thead><tr>
+            <th>#</th>
             <th>Date</th>
             <th>Ticket</th>
             <th>Platform</th>
@@ -1916,7 +1918,7 @@ function renderAllReviews() {
 
   const tbody = document.getElementById('allreviews-body');
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
     return;
   }
 
@@ -1936,7 +1938,7 @@ function renderAllReviews() {
     const payBtn = (() => {
       if (r.finalStatus !== 'Valid') return '';
       const ps = getPayoutPaidStatus_(r.agentEmail, r.month);
-      if (ps === null) return `<button class="ar-act-btn" style="opacity:.45;cursor:help" title="Generate the payout report for ${r.month||'this month'} first" disabled>💳</button>`;
+      if (ps === null) return `<button class="ar-act-btn unpaid" title="No payout generated for ${r.month||'this month'} yet — click for help" onclick="showToast('💡 Go to Payouts tab → select ${r.month||'the month'} → Generate Report. Then pay buttons activate automatically.','#F59E0B')">💳</button>`;
       const isPaid = ps === 'Paid';
       return `<button class="ar-act-btn ${isPaid?'paid':'unpaid'}" title="${isPaid?'Paid — click to revert':'Mark agent paid'}" onclick="togglePaid('${r.month}','${sEmail}','${isPaid?'Unpaid':'Paid'}')">${isPaid?'✅':'💳'}</button>`;
     })();
@@ -1967,6 +1969,7 @@ function renderAllReviews() {
       </div>` : (r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="ar-act-btn" title="View screenshot">📸</a>` : '');
 
     return `<tr>
+      <td><code style="font-size:.69rem;background:#EEF2FF;color:#4F46E5;padding:.08rem .28rem;border-radius:.25rem;font-weight:700;letter-spacing:-.3px" title="${escHtml(r.reviewCode||'')}">${escHtml(r.reviewCode||'—')}</code></td>
       <td style="color:#64748B">${formatDate(r.registrationDate||r.submittedAt||'')}</td>
       <td><code style="font-size:.71rem;background:#F1F5F9;color:#475569;padding:.08rem .3rem;border-radius:.25rem">${escHtml(r.ticketId||'—')}</code></td>
       <td>${escHtml(r.platform||'—')}</td>
@@ -2295,8 +2298,9 @@ function payStatusBtn_(agentEmail, month) {
   const safeEmail = (agentEmail||'').replace(/'/g, "\\'");
 
   if (ps === null) {
-    // No payout record yet — show a disabled indicator
-    return `<button class="btn btn-icon" style="background:#F3F4F6;color:#9CA3AF;border:1px solid #E5E7EB;cursor:help;font-size:.75rem;padding:.22rem .38rem" title="Payout not generated for ${month||'this month'} yet — go to Payouts tab and click Generate Report first" disabled>💳</button>`;
+    // No payout record yet — show a clickable amber button that explains what to do
+    const safeMonth = (month||'this month').replace(/'/g, "\\'");
+    return `<button class="ar-act-btn unpaid" title="No payout generated for ${month||'this month'} yet — click for instructions" onclick="showToast('💡 Go to Payouts tab → select ${safeMonth} → Generate Report. Then the pay button activates automatically.','#F59E0B')">💳</button>`;
   }
 
   const isPaid    = ps === 'Paid';
