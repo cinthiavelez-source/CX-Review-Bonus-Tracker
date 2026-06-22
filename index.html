@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-m -->
+<!-- v2026-05-27-n -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -52,7 +52,7 @@
     #page-allreviews col.c-agent  { width: 126px; }
     #page-allreviews col.c-sup    { width: 116px; }
     #page-allreviews col.c-status { width: 106px; }
-    #page-allreviews col.c-reason { width: 1fr; }
+    #page-allreviews col.c-reason { width: 110px; }
     #page-allreviews col.c-act    { width: 126px; }
     /* Action menu */
     .ar-act-wrap { display: inline-flex; align-items: center; gap: .2rem; position: relative; }
@@ -1977,7 +1977,7 @@ function renderAllReviews() {
       <td style="font-weight:600;color:#1E1B4B" title="${escHtml(r.agentEmail||'')}">${escHtml(r.agentName||'—')}</td>
       <td style="color:#0F766E" title="${escHtml(r.supervisorEmail||'')}">${escHtml(r.supervisorName||'—')}</td>
       <td>${statusBadge(r.finalStatus)}${r.finalStatus==='Valid'?`<span style="color:#10B981;font-weight:700;font-size:.76rem;margin-left:.25rem">$${r.bonusRate||0}</span>`:''}</td>
-      <td title="${escHtml(reasonTxt||flagCode||'')}">${reasonDisplay}</td>
+      <td title="${escHtml(reasonTxt||flagCode||'')}" style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${reasonDisplay}</td>
       <td style="overflow:visible">
         <div class="ar-act-wrap">
           ${primaryBtn}${rejectBtn}${payBtn}${moreMenu}
