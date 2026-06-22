@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-g -->
+<!-- v2026-05-27-i -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -460,6 +460,7 @@
         <span class="filter-label" style="font-size:.78rem">To:</span>
         <input type="date" id="filter-to-date" onchange="renderReviews()" style="font-size:.82rem" />
         <button class="btn btn-secondary btn-sm" onclick="clearFilters()">Clear</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportMyReviewsCSV()" title="Export filtered view as CSV">⬇️ Export CSV</button>
         <span id="reviews-count" style="margin-left:auto;font-size:.82rem;color:#64748B"></span>
       </div>
       <div class="table-wrap">
@@ -512,6 +513,7 @@
         <span class="filter-label" style="font-size:.78rem">To:</span>
         <input type="date" id="ar-to-date" onchange="renderAllReviews()" style="font-size:.82rem" />
         <button class="btn btn-secondary btn-sm" onclick="clearAllReviewsFilters()">Clear</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportAllReviewsCSV()" title="Export filtered view as CSV">⬇️ Export CSV</button>
         <span id="ar-count" style="margin-left:auto;font-size:.82rem;color:#64748B"></span>
       </div>
       <div class="table-wrap">
@@ -551,6 +553,7 @@
           <option value="">All Agents</option>
         </select>
         <button class="btn btn-secondary btn-sm" onclick="clearLeaderboardFilters()">Clear</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportLeaderboardCSV()" title="Export leaderboard as CSV">⬇️ Export CSV</button>
       </div>
       <div class="card-title" id="lb-month-label">Current Month</div>
       <div id="leaderboard-list"></div>
@@ -1669,6 +1672,7 @@ function renderReviews() {
   if (countEl) countEl.textContent = `${rows.length} review${rows.length !== 1 ? 's' : ''}`;
 
   rows = rows.sort((a,b) => new Date(b.submittedAt||0) - new Date(a.submittedAt||0));
+  cachedMyReviewsRows_ = rows; // cache for CSV export
 
   const tbody = document.getElementById('reviews-body');
   if (!rows.length) {
@@ -1695,6 +1699,9 @@ function renderReviews() {
           ${r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View screenshot">📸</a>` : ''}
           ${(isAdm || isSup) && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending') ? `
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" title="Override to Valid" onclick="quickMarkValid('${r.id}','${escHtml(r.agentName||r.agentEmail||'')}','${escHtml(r.platform||'')}')">✅ Mark Valid</button>
+          ` : ''}
+          ${(isAdm || isSup) && r.finalStatus !== 'Rejected' ? `
+            <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5;font-size:.72rem;padding:.2rem .5rem" title="Reject &amp; close this case" onclick="quickRejectReview_('${r.id}')">🚫 Reject</button>
           ` : ''}
           ${isAdm && r.finalStatus !== 'Rejected' ? `
             <button class="btn btn-secondary btn-icon" title="Re-run AI validation" onclick="revalidate('${r.id}','${escHtml(r.screenshotDriveUrl||'')}','${escHtml(r.platform||'')}')">🔄</button>
@@ -1866,6 +1873,7 @@ function renderAllReviews() {
 
   const countEl = document.getElementById('ar-count');
   if (countEl) countEl.textContent = `${rows.length} review${rows.length !== 1 ? 's' : ''}`;
+  cachedAllReviewsRows_ = rows; // cache for CSV export
 
   const tbody = document.getElementById('allreviews-body');
   if (!rows.length) {
@@ -1898,10 +1906,12 @@ function renderAllReviews() {
           ${r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View screenshot">📸</a>` : ''}
           ${(!isAgent && r.finalStatus === 'Pending Review') ? `
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','approve')">✅ Approve</button>
-            <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','reject')">❌ Reject</button>
           ` : ''}
           ${(!isAgent && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending')) ? `
             <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" title="Override to Valid" onclick="quickMarkValid('${r.id}','${escHtml(r.agentName||r.agentEmail||'')}','${escHtml(r.platform||'')}')">✅ Mark Valid</button>
+          ` : ''}
+          ${(isAdm || isSup) && r.finalStatus !== 'Rejected' ? `
+            <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5;font-size:.72rem;padding:.2rem .5rem" title="Reject &amp; close this case" onclick="quickRejectReview_('${r.id}')">🚫 Reject</button>
           ` : ''}
           ${isAdm && r.finalStatus !== 'Rejected' ? `
             <button class="btn btn-secondary btn-icon" title="Manual override (any status)" onclick="openOverrideModal('${r.id}')">⚙️</button>
@@ -1910,6 +1920,7 @@ function renderAllReviews() {
           ${isAdm && r.finalStatus === 'Rejected' ? `
             <button class="btn btn-danger btn-icon" title="Delete" onclick="deleteReview('${r.id}')">🗑️</button>
           ` : ''}
+          ${(isAdm || isSup) && r.finalStatus === 'Valid' ? payStatusBtn_(r.agentEmail, r.month) : ''}
         </div>
       </td>
     </tr>`).join('');
@@ -1991,6 +2002,7 @@ function renderLeaderboard() {
   // Cap to top 10
   const fullCount = data.length;
   if (!agentFilter) data = data.slice(0, 10);
+  cachedLeaderboardRows_ = data; // cache for CSV export
 
   const list = document.getElementById('leaderboard-list');
   if (!data.length) {
@@ -2192,6 +2204,7 @@ async function loadPayoutData() {
 // Normalizes payout rows from either backend format (raw sheet) or generated format
 function normalizePayoutRows(rows) {
   return rows.map(p => ({
+    month:      p.month       || '',
     agentEmail: p.agentEmail  || '',
     agentName:  p.agentName   || p.agentEmail || '',
     ripplingId: p.ripplingId  || '',
@@ -2203,6 +2216,32 @@ function normalizePayoutRows(rows) {
     paidDate:   p.paidDate    || '',
     paidBy:     p.paidBy      || ''
   }));
+}
+
+// Look up whether an agent's payout for a given month is Paid/Unpaid.
+// Returns 'Paid', 'Unpaid', or null (no payout generated yet for that month).
+function getPayoutPaidStatus_(agentEmail, month) {
+  if (!agentEmail || !month) return null;
+  const rec = cachedAllPayouts.find(
+    p => p.agentEmail.toLowerCase() === agentEmail.toLowerCase() && p.month === month
+  );
+  return rec ? (rec.paidStatus || 'Unpaid') : null;
+}
+
+// Returns a "Mark Paid / ✅ Paid" button HTML for a review row action cell.
+// Only shown to admins/supervisors for Valid reviews that have a payout record.
+function payStatusBtn_(agentEmail, month) {
+  const ps = getPayoutPaidStatus_(agentEmail, month);
+  if (ps === null) return ''; // payout not generated yet — no button
+  const isPaid = ps === 'Paid';
+  const newStatus = isPaid ? 'Unpaid' : 'Paid';
+  const style = isPaid
+    ? 'background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7'
+    : 'background:#FEF3C7;color:#92400E;border:1px solid #FCD34D';
+  const label = isPaid ? '✅ Paid' : '💳 Mark Paid';
+  const title = isPaid ? 'Click to revert payment' : 'Mark agent paid for this month';
+  const safeEmail = agentEmail.replace(/'/g, "\\'");
+  return `<button class="btn btn-sm" style="${style};font-size:.72rem;padding:.2rem .5rem" title="${title}" onclick="togglePaid('${month}','${safeEmail}','${newStatus}')">${label}</button>`;
 }
 
 let cachedPayoutRows  = [];  // last-rendered payout rows for agent filter
@@ -2322,6 +2361,70 @@ function exportMonthlyPayoutCSV() {
   URL.revokeObjectURL(url);
   showToast(`✅ CSV exported: CX_Payout_${month}.csv`, '#10B981');
 }
+
+// ── SHARED CSV HELPERS ────────────────────────────────────────────────────────
+function csvEsc_(v) {
+  const s = String(v ?? '');
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function downloadCSV_(filename, headers, dataRows) {
+  const csv = [headers.map(csvEsc_).join(','), ...dataRows.map(r => r.map(csvEsc_).join(','))].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  showToast(`✅ Exported: ${filename}`, '#10B981');
+}
+
+// Export All Reviews (current filtered view)
+function exportAllReviewsCSV() {
+  const rows = [...document.querySelectorAll('#allreviews-body tr')];
+  if (!rows.length || rows[0].querySelector('td[colspan]')) {
+    showToast('No data to export.', '#F59E0B'); return;
+  }
+  const headers = ['Code','Reg. Date','Review Date','Ticket','Platform','Customer','Agent','Agent Email','Supervisor','Status','Reason','Duplicate Flag','Bonus'];
+  const data = cachedAllReviewsRows_.map(r => [
+    r.reviewCode||'', r.registrationDate||r.submittedAt||'', r.reviewDate||'',
+    r.ticketId||'', r.platform||'', r.customerName||'',
+    r.agentName||r.agentEmail||'', r.agentEmail||'',
+    r.supervisorName||'', r.finalStatus||'',
+    r.finalStatus!=='Valid' ? reasonText(r) : '',
+    r.duplicateFlag||'',
+    r.finalStatus==='Valid' ? `$${r.bonusRate||0}` : ''
+  ]);
+  downloadCSV_(`CX_AllReviews_${new Date().toISOString().slice(0,10)}.csv`, headers, data);
+}
+
+// Export My Reviews (current filtered view)
+function exportMyReviewsCSV() {
+  const headers = ['Code','Reg. Date','Review Date','Ticket','Platform','Customer','Status','Reason','Bonus'];
+  const data = cachedMyReviewsRows_.map(r => [
+    r.reviewCode||'', r.registrationDate||r.submittedAt||'', r.reviewDate||'',
+    r.ticketId||'', r.platform||'', r.customerName||'',
+    r.finalStatus||'',
+    r.finalStatus!=='Valid' ? reasonText(r) : '',
+    r.finalStatus==='Valid' ? `$${r.bonusRate||0}` : ''
+  ]);
+  if (!data.length) { showToast('No data to export.', '#F59E0B'); return; }
+  downloadCSV_(`CX_MyReviews_${new Date().toISOString().slice(0,10)}.csv`, headers, data);
+}
+
+// Export Leaderboard (current view)
+function exportLeaderboardCSV() {
+  const headers = ['Rank','Agent Name','Agent Email','Valid Reviews','Pending','Invalid','Bonus','Tier'];
+  const data = cachedLeaderboardRows_.map((a, i) => [
+    i+1, a.name||'', a.email||'', a.valid||0, a.pending||0, a.invalid||0, `$${a.bonus||0}`, a.tier||''
+  ]);
+  if (!data.length) { showToast('No data to export.', '#F59E0B'); return; }
+  downloadCSV_(`CX_Leaderboard_${new Date().toISOString().slice(0,10)}.csv`, headers, data);
+}
+
+// Cache of last-rendered rows for export (set in render functions below)
+let cachedAllReviewsRows_ = [];
+let cachedMyReviewsRows_  = [];
+let cachedLeaderboardRows_ = [];
 
 // Toggle payment status for a single agent in the current month view
 async function togglePaid(month, agentEmail, newStatus) {
@@ -2600,6 +2703,27 @@ function extractDriveFileIdFE(url) {
   for (const p of patterns) { const m = url.match(p); if (m) return m[1]; }
   if (/^[a-zA-Z0-9_-]{25,}$/.test((url||'').trim())) return url.trim();
   return null;
+}
+
+// Universal reject / close-case action — works for any current status
+async function quickRejectReview_(id) {
+  const note = prompt('Reason for rejecting / closing this case (optional):') ?? null;
+  if (note === null) return; // user cancelled the prompt
+  if (!confirm(`Reject this review and close the case?${note ? `\n\nReason: "${note}"` : ''}`)) return;
+  showLoading(true, 'Closing case…');
+  try {
+    await apiPost({ action: 'overrideValidation', id, finalStatus: 'Rejected', overrideNote: note || 'Closed by admin' });
+    logAudit('REJECT_REVIEW', `Rejected/closed review ID ${id}${note ? ` — reason: ${note}` : ''}`);
+    showToast('🚫 Case closed and review rejected.', '#EF4444');
+    await apiFetch();
+    renderReviews();
+    renderAllReviews();
+    renderDashboard();
+  } catch (err) {
+    showToast('Error: ' + err.message, '#EF4444');
+  } finally {
+    showLoading(false);
+  }
 }
 
 async function supervisorDecision(id, decision) {
