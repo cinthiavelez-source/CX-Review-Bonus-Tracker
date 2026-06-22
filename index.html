@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-j -->
+<!-- v2026-05-27-l -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -36,8 +36,37 @@
     /* ── LAYOUT ── */
     .main { max-width: 1120px; margin: 0 auto; padding: 2rem 1.25rem; }
     .main.wide { max-width: 1500px; }
-    #page-allreviews table th { padding: .5rem .65rem; font-size: .69rem; }
-    #page-allreviews table td { padding: .55rem .65rem; font-size: .77rem; }
+    /* All Reviews — compact single-line rows */
+    .main.wide { max-width: calc(100vw - 2rem); }
+    #page-allreviews .card { padding: 1rem .75rem; }
+    #page-allreviews table { table-layout: fixed; }
+    #page-allreviews table th { padding: .38rem .45rem; font-size: .63rem; white-space: nowrap; }
+    #page-allreviews table td { padding: .4rem .45rem; font-size: .74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+    #page-allreviews tbody tr { height: 38px; max-height: 38px; }
+    /* Column widths */
+    #page-allreviews col.c-date   { width: 82px; }
+    #page-allreviews col.c-ticket { width: 70px; }
+    #page-allreviews col.c-plat   { width: 90px; }
+    #page-allreviews col.c-cust   { width: 100px; }
+    #page-allreviews col.c-agent  { width: 130px; }
+    #page-allreviews col.c-sup    { width: 120px; }
+    #page-allreviews col.c-status { width: 110px; }
+    #page-allreviews col.c-reason { width: 160px; }
+    #page-allreviews col.c-act    { width: 130px; }
+    /* Action menu */
+    .ar-act-wrap { display: inline-flex; align-items: center; gap: .2rem; position: relative; }
+    .ar-act-menu { display: none; position: absolute; right: 0; top: calc(100% + 3px); z-index: 300; background: white; border: 1.5px solid #E5E7EB; border-radius: .6rem; box-shadow: 0 6px 24px rgba(0,0,0,.13); padding: .35rem; min-width: 140px; flex-direction: column; gap: .2rem; }
+    .ar-act-menu.open { display: flex; }
+    .ar-act-menu-item { display: flex; align-items: center; gap: .5rem; padding: .35rem .6rem; border-radius: .4rem; font-size: .78rem; font-weight: 600; cursor: pointer; border: none; background: none; width: 100%; text-align: left; font-family: inherit; text-decoration: none; color: #374151; transition: background .1s; }
+    .ar-act-menu-item:hover { background: #F3F4F6; }
+    .ar-act-menu-item.danger { color: #DC2626; }
+    .ar-act-menu-item.danger:hover { background: #FEF2F2; }
+    .ar-act-btn { background: #F9FAFB; border: 1.5px solid #E5E7EB; border-radius: .4rem; padding: .22rem .42rem; font-size: .8rem; cursor: pointer; transition: all .1s; color: #374151; line-height: 1; }
+    .ar-act-btn:hover { background: #F3F4F6; border-color: #D1D5DB; }
+    .ar-act-btn.primary { background: #D1FAE5; border-color: #6EE7B7; color: #065F46; }
+    .ar-act-btn.danger  { background: #FEF2F2; border-color: #FECACA; color: #DC2626; }
+    .ar-act-btn.paid    { background: #D1FAE5; border-color: #6EE7B7; color: #065F46; }
+    .ar-act-btn.unpaid  { background: #FFFBEB; border-color: #FDE68A; color: #92400E; }
     .page { display: none; opacity: 0; }
     .page.active { display: block; animation: pageIn 0.15s ease forwards; }
     @keyframes pageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -536,19 +565,19 @@
       </div>
       <div class="table-wrap">
         <table>
+          <colgroup>
+            <col class="c-date"><col class="c-ticket"><col class="c-plat"><col class="c-cust">
+            <col class="c-agent"><col class="c-sup"><col class="c-status"><col class="c-reason"><col class="c-act">
+          </colgroup>
           <thead><tr>
-            <th>Code</th>
-            <th>Reg. Date</th>
-            <th>Review Date</th>
+            <th>Date</th>
             <th>Ticket</th>
             <th>Platform</th>
             <th>Customer</th>
             <th>Agent</th>
             <th>Supervisor</th>
-            <th>Status</th>
-            <th>Reason</th>
-            <th>Flag</th>
-            <th>Bonus</th>
+            <th>Status / Bonus</th>
+            <th>Reason / Flag</th>
             <th>Actions</th>
           </tr></thead>
           <tbody id="allreviews-body"></tbody>
@@ -1269,7 +1298,13 @@ function renderPage(page) {
   if (page === 'leaderboard') renderLeaderboard();
   if (page === 'payout')      renderPayoutEmpty();
   if (page === 'admin')       { loadReviewQueue(); loadHierarchy(); loadAuditLog(); }
-  if (page === 'allreviews')  renderAllReviews();
+  if (page === 'allreviews')  {
+    renderAllReviews();
+    // Pre-load payout history so 💳 pay buttons have real status data
+    if (!cachedAllPayouts.length) {
+      loadAllPayoutHistory().then(() => { if (currentPage === 'allreviews') renderAllReviews(); });
+    }
+  }
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
@@ -1881,53 +1916,72 @@ function renderAllReviews() {
 
   const tbody = document.getElementById('allreviews-body');
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="13"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
     return;
   }
 
-  tbody.innerHTML = rows.map(r => `
-    <tr>
-      <td><code style="font-size:.78rem;background:#EEF2FF;color:#4F46E5;padding:.2rem .4rem;border-radius:.3rem;font-weight:600">${escHtml(r.reviewCode||'—')}</code></td>
-      <td style="font-size:.8rem;color:#64748B">${r.registrationDate ? formatDate(r.registrationDate) : formatDate(r.submittedAt)}</td>
-      <td style="font-size:.8rem;color:#64748B">${r.reviewDate ? formatDate(r.reviewDate) : '—'}</td>
-      <td><code style="font-size:.75rem;background:#F1F5F9;color:#475569;padding:.15rem .35rem;border-radius:.3rem">${escHtml(r.ticketId||'—')}</code></td>
+  tbody.innerHTML = rows.map(r => {
+    const sEmail = (r.agentEmail||'').replace(/'/g,'\\\'');
+    const sName  = escHtml(r.agentName||r.agentEmail||'');
+    const sPlatf = escHtml(r.platform||'');
+
+    // Reason+flag merged, tooltip on hover
+    const reasonTxt = r.finalStatus !== 'Valid' ? reasonText(r) : '';
+    const flagCode  = r.duplicateFlag ? safeStr(r.duplicateFlag).split(':')[0] : '';
+    const reasonDisplay = reasonTxt
+      ? `<span title="${escHtml(reasonTxt)}" style="color:${r.finalStatus==='Rejected'?'#991B1B':r.finalStatus==='Invalid'?'#B45309':'#5B21B6'}">${escHtml(reasonTxt)}</span>`
+      : (flagCode ? `<span style="color:#7C3AED" title="${escHtml(r.duplicateFlag||'')}">🚩 ${escHtml(flagCode)}</span>` : '<span style="color:#CBD5E1">—</span>');
+
+    // Pay button
+    const payBtn = (() => {
+      if (r.finalStatus !== 'Valid') return '';
+      const ps = getPayoutPaidStatus_(r.agentEmail, r.month);
+      if (ps === null) return `<button class="ar-act-btn" style="opacity:.45;cursor:help" title="Generate the payout report for ${r.month||'this month'} first" disabled>💳</button>`;
+      const isPaid = ps === 'Paid';
+      return `<button class="ar-act-btn ${isPaid?'paid':'unpaid'}" title="${isPaid?'Paid — click to revert':'Mark agent paid'}" onclick="togglePaid('${r.month}','${sEmail}','${isPaid?'Unpaid':'Paid'}')">${isPaid?'✅':'💳'}</button>`;
+    })();
+
+    // Primary action button (inline, always visible)
+    const primaryBtn = (() => {
+      if (!isAgent && r.finalStatus === 'Pending Review')
+        return `<button class="ar-act-btn primary" title="Approve submission" onclick="supervisorDecision('${r.id}','approve')">✅ Approve</button>`;
+      if (!isAgent && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending'))
+        return `<button class="ar-act-btn primary" title="Mark as Valid" onclick="quickMarkValid('${r.id}','${sName}','${sPlatf}')">✔ Valid</button>`;
+      return '';
+    })();
+
+    // Reject button (inline, always visible for non-rejected)
+    const rejectBtn = (isAdm || isSup) && r.finalStatus !== 'Rejected'
+      ? `<button class="ar-act-btn danger" title="Reject & close case" onclick="quickRejectReview_('${r.id}')">🚫</button>`
+      : '';
+
+    // ⋮ dropdown menu (secondary admin actions)
+    const moreMenu = isAdm ? `
+      <div class="ar-act-wrap">
+        <button class="ar-act-btn" onclick="arMenuToggle_(this)" title="More actions">⋮</button>
+        <div class="ar-act-menu">
+          ${r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="ar-act-menu-item">📸 View screenshot</a>` : ''}
+          ${r.finalStatus !== 'Rejected' ? `<button class="ar-act-menu-item" onclick="openOverrideModal('${r.id}')">⚙️ Override status</button>` : ''}
+          <button class="ar-act-menu-item danger" onclick="deleteReview('${r.id}')">🗑️ Delete</button>
+        </div>
+      </div>` : (r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="ar-act-btn" title="View screenshot">📸</a>` : '');
+
+    return `<tr>
+      <td style="color:#64748B">${formatDate(r.registrationDate||r.submittedAt||'')}</td>
+      <td><code style="font-size:.71rem;background:#F1F5F9;color:#475569;padding:.08rem .3rem;border-radius:.25rem">${escHtml(r.ticketId||'—')}</code></td>
       <td>${escHtml(r.platform||'—')}</td>
-      <td>${escHtml(r.customerName||'—')}</td>
-      <td style="font-size:.82rem">
-        <div style="font-weight:600;color:#1E1B4B">${escHtml(r.agentName||'—')}</div>
-        <div style="color:#94A3B8;font-size:.75rem">${escHtml(r.agentEmail||'')}</div>
-      </td>
-      <td style="font-size:.82rem">
-        <div style="font-weight:600;color:#0F766E">${escHtml(r.supervisorName||'—')}</div>
-        <div style="color:#94A3B8;font-size:.75rem">${escHtml(r.supervisorEmail||'')}</div>
-      </td>
-      <td>${statusBadge(r.finalStatus)}</td>
-      <td style="font-size:.75rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${r.finalStatus==='Valid'?'#94A3B8':r.finalStatus==='Rejected'?'#991B1B':r.finalStatus==='Invalid'?'#92400E':'#5B21B6'}" title="${escHtml(reasonText(r))}">${r.finalStatus!=='Valid'?escHtml(reasonText(r)):'—'}</td>
-      <td style="font-size:.75rem;color:${r.duplicateFlag?'#7C3AED':'#94A3B8'};max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(r.duplicateFlag||'')}">${r.duplicateFlag ? '🚩 ' + escHtml(safeStr(r.duplicateFlag).split(':')[0]) : '—'}</td>
-      <td>${r.finalStatus === 'Valid' ? `<strong style="color:#10B981">$${r.bonusRate||0}</strong>` : '—'}</td>
-      <td>
-        <div class="inline-actions">
-          ${r.screenshotDriveUrl ? `<a href="${escHtml(r.screenshotDriveUrl)}" target="_blank" class="btn btn-secondary btn-icon" title="View screenshot">📸</a>` : ''}
-          ${(!isAgent && r.finalStatus === 'Pending Review') ? `
-            <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" onclick="supervisorDecision('${r.id}','approve')">✅ Approve</button>
-          ` : ''}
-          ${(!isAgent && (r.finalStatus === 'Invalid' || r.finalStatus === 'Pending')) ? `
-            <button class="btn btn-sm" style="background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;font-size:.75rem;padding:.2rem .5rem" title="Override to Valid" onclick="quickMarkValid('${r.id}','${escHtml(r.agentName||r.agentEmail||'')}','${escHtml(r.platform||'')}')">✅ Mark Valid</button>
-          ` : ''}
-          ${(isAdm || isSup) && r.finalStatus !== 'Rejected' ? `
-            <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5;font-size:.72rem;padding:.2rem .5rem" title="Reject &amp; close this case" onclick="quickRejectReview_('${r.id}')">🚫 Reject</button>
-          ` : ''}
-          ${isAdm && r.finalStatus !== 'Rejected' ? `
-            <button class="btn btn-secondary btn-icon" title="Manual override (any status)" onclick="openOverrideModal('${r.id}')">⚙️</button>
-            <button class="btn btn-danger btn-icon" title="Delete" onclick="deleteReview('${r.id}')">🗑️</button>
-          ` : ''}
-          ${isAdm && r.finalStatus === 'Rejected' ? `
-            <button class="btn btn-danger btn-icon" title="Delete" onclick="deleteReview('${r.id}')">🗑️</button>
-          ` : ''}
-          ${(isAdm || isSup) && r.finalStatus === 'Valid' ? payStatusBtn_(r.agentEmail, r.month) : ''}
+      <td title="${escHtml(r.customerName||'')}">${escHtml(r.customerName||'—')}</td>
+      <td style="font-weight:600;color:#1E1B4B" title="${escHtml(r.agentEmail||'')}">${escHtml(r.agentName||'—')}</td>
+      <td style="color:#0F766E" title="${escHtml(r.supervisorEmail||'')}">${escHtml(r.supervisorName||'—')}</td>
+      <td>${statusBadge(r.finalStatus)}${r.finalStatus==='Valid'?`<span style="color:#10B981;font-weight:700;font-size:.76rem;margin-left:.25rem">$${r.bonusRate||0}</span>`:''}</td>
+      <td title="${escHtml(reasonTxt||flagCode||'')}">${reasonDisplay}</td>
+      <td style="overflow:visible">
+        <div class="ar-act-wrap">
+          ${primaryBtn}${rejectBtn}${payBtn}${moreMenu}
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 function clearAllReviewsFilters() {
@@ -2234,19 +2288,25 @@ function getPayoutPaidStatus_(agentEmail, month) {
 }
 
 // Returns a "Mark Paid / ✅ Paid" button HTML for a review row action cell.
-// Only shown to admins/supervisors for Valid reviews that have a payout record.
+// Always shown for Valid reviews. If no payout record exists yet, shows a
+// greyed-out 💳 icon with a tooltip explaining the user needs to generate the report.
 function payStatusBtn_(agentEmail, month) {
   const ps = getPayoutPaidStatus_(agentEmail, month);
-  if (ps === null) return ''; // payout not generated yet — no button
-  const isPaid = ps === 'Paid';
+  const safeEmail = (agentEmail||'').replace(/'/g, "\\'");
+
+  if (ps === null) {
+    // No payout record yet — show a disabled indicator
+    return `<button class="btn btn-icon" style="background:#F3F4F6;color:#9CA3AF;border:1px solid #E5E7EB;cursor:help;font-size:.75rem;padding:.22rem .38rem" title="Payout not generated for ${month||'this month'} yet — go to Payouts tab and click Generate Report first" disabled>💳</button>`;
+  }
+
+  const isPaid    = ps === 'Paid';
   const newStatus = isPaid ? 'Unpaid' : 'Paid';
-  const style = isPaid
+  const style     = isPaid
     ? 'background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7'
     : 'background:#FEF3C7;color:#92400E;border:1px solid #FCD34D';
-  const label = isPaid ? '✅ Paid' : '💳 Mark Paid';
-  const title = isPaid ? 'Click to revert payment' : 'Mark agent paid for this month';
-  const safeEmail = agentEmail.replace(/'/g, "\\'");
-  return `<button class="btn btn-sm" style="${style};font-size:.72rem;padding:.2rem .5rem" title="${title}" onclick="togglePaid('${month}','${safeEmail}','${newStatus}')">${label}</button>`;
+  const label = isPaid ? '✅' : '💳';
+  const title = isPaid ? 'Paid — click to revert' : 'Mark agent paid for this month';
+  return `<button class="btn btn-icon" style="${style};font-size:.75rem;padding:.22rem .38rem" title="${title}" onclick="togglePaid('${month}','${safeEmail}','${newStatus}')">${label}</button>`;
 }
 
 let cachedPayoutRows  = [];  // last-rendered payout rows for agent filter
@@ -2708,6 +2768,18 @@ function extractDriveFileIdFE(url) {
   for (const p of patterns) { const m = url.match(p); if (m) return m[1]; }
   if (/^[a-zA-Z0-9_-]{25,}$/.test((url||'').trim())) return url.trim();
   return null;
+}
+
+// Toggle the ⋮ action dropdown for a row in All Reviews
+function arMenuToggle_(btn) {
+  const menu = btn.nextElementSibling;
+  // Close all other open menus
+  document.querySelectorAll('.ar-act-menu.open').forEach(m => { if (m !== menu) m.classList.remove('open'); });
+  menu.classList.toggle('open');
+  if (menu.classList.contains('open')) {
+    const close = (e) => { if (!btn.parentElement.contains(e.target)) { menu.classList.remove('open'); document.removeEventListener('click', close); } };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
 }
 
 // Universal reject / close-case action — works for any current status
