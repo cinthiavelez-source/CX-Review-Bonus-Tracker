@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-p -->
+<!-- v2026-05-27-q -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -1935,13 +1935,14 @@ function renderAllReviews() {
       ? `<span title="${escHtml(reasonTxt)}" style="color:${r.finalStatus==='Rejected'?'#991B1B':r.finalStatus==='Invalid'?'#B45309':'#5B21B6'}">${escHtml(reasonTxt)}</span>`
       : (flagCode ? `<span style="color:#7C3AED" title="${escHtml(r.duplicateFlag||'')}">🚩 ${escHtml(flagCode)}</span>` : '<span style="color:#CBD5E1">—</span>');
 
-    // Pay button
+    // Pay button — uses review-level paidStatus (no Payouts tab dependency)
     const payBtn = (() => {
       if (r.finalStatus !== 'Valid') return '';
-      const ps = getPayoutPaidStatus_(r.agentEmail, r.month);
-      if (ps === null) return `<button class="ar-act-btn unpaid" title="No payout generated for ${r.month||'this month'} yet — click for help" onclick="showToast('💡 Go to Payouts tab → select ${r.month||'the month'} → Generate Report. Then pay buttons activate automatically.','#F59E0B')">💳</button>`;
-      const isPaid = ps === 'Paid';
-      return `<button class="ar-act-btn ${isPaid?'paid':'unpaid'}" title="${isPaid?'Paid — click to revert':'Mark agent paid'}" onclick="togglePaid('${r.month}','${sEmail}','${isPaid?'Unpaid':'Paid'}')">${isPaid?'✅':'💳'}</button>`;
+      if (r.paidStatus === 'Paid') {
+        const paidTip = r.paidDate ? `Paid on ${formatDate(r.paidDate)}${r.paidBy ? ' by ' + r.paidBy : ''}` : 'Paid';
+        return `<span class="ar-act-btn paid" style="cursor:default" title="${escHtml(paidTip)}">✅</span>`;
+      }
+      return `<button class="ar-act-btn unpaid" title="Mark this review as paid" onclick="markReviewPaid('${escHtml(r.id)}')">💳</button>`;
     })();
 
     // Primary action button (inline, always visible)
@@ -2496,7 +2497,25 @@ let cachedAllReviewsRows_ = [];
 let cachedMyReviewsRows_  = [];
 let cachedLeaderboardRows_ = [];
 
-// Toggle payment status for a single agent in the current month view
+// Mark a single review as paid (review-level, stored on the review row itself).
+// One-way: once paid, the button becomes a static ✅ badge with no edit option.
+async function markReviewPaid(reviewId) {
+  if (!confirm('Mark this review as paid? This cannot be undone.')) return;
+  showLoading(true, 'Marking review as paid…');
+  try {
+    await apiPost({ action: 'markReviewPaid', id: reviewId });
+    logAudit('MARK_REVIEW_PAID', `Marked review ${reviewId} as paid`);
+    showToast('✅ Review marked as paid.', '#10B981');
+    await apiFetch();       // refresh all cached records so paidStatus is current
+    renderAllReviews();
+  } catch (err) {
+    showToast('Error: ' + err.message, '#EF4444');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Toggle payment status for a single agent in the current month view (Payouts tab)
 async function togglePaid(month, agentEmail, newStatus) {
   showLoading(true, newStatus === 'Paid' ? 'Marking as paid…' : 'Reverting payment…');
   try {
