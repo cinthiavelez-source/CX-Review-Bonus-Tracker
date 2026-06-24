@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-06-24-c -->
+<!-- v2026-06-24-d -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -177,6 +177,9 @@
     .filter-label { font-size: .78rem; color: #6B7280; font-weight: 600; letter-spacing: -.1px; }
 
     /* ── PAYOUT TABLE ── */
+    /* Payout table header should NOT be sticky — the table is short and the sticky header
+       hides row #1 on initial render. Override the global sticky-th rule here. */
+    #page-payout .table-wrap thead th { position: relative; top: auto; z-index: auto; }
     .payout-total { background: linear-gradient(135deg, #3730A3, #6D28D9); color: white; border-radius: 1.1rem; padding: 1.5rem 2rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 20px rgba(79,70,229,.3); }
     .payout-total-label { font-size: .88rem; opacity: .8; font-weight: 500; }
     .payout-total-amount { font-size: 2.4rem; font-weight: 800; letter-spacing: -1px; }
@@ -3018,56 +3021,84 @@ function renderMoMTable(rows) {
   // Merge: review data fills in months missing from Payouts sheet;
   //        Payouts sheet provides payment status overlay.
 
-  // Index Payouts sheet rows by agentEmail+month for quick lookup
-  const payoutsIndex = {};  // `${ae}|${month}` → row
+  // ── Lookup tables ─────────────────────────────────────────────────────────────
+  // Rippling IDs: prefer Payouts sheet (populated by backend getRipplingId), fall back to review field
+  const ripplingByAgent = {};
+  rows.forEach(p => {
+    const ae = (p.agentEmail || '').toLowerCase();
+    if (ae && p.ripplingId) ripplingByAgent[ae] = p.ripplingId;
+  });
+
+  // Payouts sheet index: agentEmail|month → row (for payment status overlay)
+  const payoutsIndex = {};
   rows.forEach(p => {
     const ae = (p.agentEmail || '').toLowerCase();
     const m  = (p.month || '').substring(0, 7);
     if (ae && m) payoutsIndex[`${ae}|${m}`] = p;
   });
 
-  // Build agent×month counts from review-level data (valid reviews only)
-  const reviewCounts = {};  // agentEmail → { month → { count, agentName, ripplingId } }
+  // Build agent×month data from review-level records (valid reviews, all months)
+  // Also collect review IDs per cell so "Mark Paid" buttons know what to pay
+  const reviewCounts = {};  // agentEmail → { month → { count, agentName, ids:[] } }
   cachedData.filter(r => r.finalStatus === 'Valid').forEach(r => {
     const ae = (r.agentEmail || '').toLowerCase();
     const m  = (r.month || '').substring(0, 7);
     if (!ae || !m) return;
     if (!reviewCounts[ae]) reviewCounts[ae] = {};
-    if (!reviewCounts[ae][m]) reviewCounts[ae][m] = {
-      count: 0, agentName: r.agentName || ae, ripplingId: r.ripplingId || ''
-    };
+    if (!reviewCounts[ae][m]) reviewCounts[ae][m] = { count: 0, agentName: r.agentName || ae, ids: [] };
     reviewCounts[ae][m].count++;
+    reviewCounts[ae][m].ids.push(String(r.id));
   });
 
-  const agentMap = {};   // agentEmail → { agentName, ripplingId, months: { YYYY-MM: row } }
+  const agentMap = {};   // agentEmail → { agentName, ripplingId, months: { YYYY-MM: cell } }
   const monthSet = new Set();
 
   Object.entries(reviewCounts).forEach(([ae, months]) => {
+    // Combined unpaid count determines tier for this agent
+    const unpaidCount = Object.entries(months).reduce((s, [, d]) => {
+      const pRow = payoutsIndex[`${ae}|${Object.keys(months)[0]}`];
+      // Count only unpaid months for tier calc
+      const isMonthPaid = pRow?.paidStatus === 'Paid'
+        || cachedData.filter(r => (r.agentEmail||'').toLowerCase() === ae
+            && r.finalStatus === 'Valid' && r.paidStatus === 'Paid').length >= d.count;
+      return s + d.count;  // use total count for tier (combining all months)
+    }, 0);
+    const totalCount = Object.values(months).reduce((s, d) => s + d.count, 0);
+    const rate = getBonusRateFE(totalCount);
+    const tier = getBonusTierLabelFE(totalCount);
+
     Object.entries(months).forEach(([m, info]) => {
       monthSet.add(m);
       if (!agentMap[ae]) agentMap[ae] = {
         agentEmail: ae,
         agentName:  info.agentName,
-        ripplingId: info.ripplingId,
+        ripplingId: ripplingByAgent[ae] || '',   // ← from Payouts sheet lookup
         months: {}
       };
-      const payoutRow = payoutsIndex[`${ae}|${m}`];
-      // Build a synthetic row: review count from review data, payment status from Payouts sheet
-      const totalCount = Object.values(reviewCounts[ae]).reduce((s, d) => s + d.count, 0);
-      const rate  = getBonusRateFE(totalCount);   // combined-month tier
-      const tier  = getBonusTierLabelFE(totalCount);
+      const payoutRow  = payoutsIndex[`${ae}|${m}`];
+      // Payment status: Payouts sheet row wins if present; otherwise infer from review paidStatus
+      const paidReviews = cachedData.filter(r =>
+        (r.agentEmail||'').toLowerCase() === ae
+        && (r.month||'').substring(0,7) === m
+        && r.finalStatus === 'Valid'
+        && r.paidStatus === 'Paid'
+      ).length;
+      const isPaid = payoutRow?.paidStatus === 'Paid' || paidReviews === info.count;
+      const unpaidIds = cachedData
+        .filter(r => (r.agentEmail||'').toLowerCase() === ae
+          && (r.month||'').substring(0,7) === m
+          && r.finalStatus === 'Valid'
+          && (r.paidStatus||'') !== 'Paid')
+        .map(r => String(r.id));
+
       agentMap[ae].months[m] = {
         count:      info.count,
+        paidCount:  paidReviews,
+        unpaidIds,                      // IDs of reviews not yet paid — used by Mark Paid button
         total:      info.count * rate,
         rate,
         tier,
-        paidStatus: payoutRow?.paidStatus || (
-          // If no Payouts row: infer from individual reviews
-          cachedData.filter(r => (r.agentEmail||'').toLowerCase() === ae
-            && (r.month||'').substring(0,7) === m
-            && r.finalStatus === 'Valid'
-            && r.paidStatus === 'Paid').length === info.count ? 'Paid' : 'Unpaid'
-        ),
+        paidStatus: isPaid ? 'Paid' : 'Unpaid',
         paidDate:   payoutRow?.paidDate || ''
       };
     });
@@ -3102,14 +3133,23 @@ function renderMoMTable(rows) {
       if (!p) return `<td class="mom-month-cell" style="text-align:center;color:#CBD5E1">—</td>`;
       const isPaid = p.paidStatus === 'Paid';
       agentTotal += Number(p.total || 0);
-      const statusDot = isPaid
-        ? `<span class="mc-status" style="color:#10B981">✅ Paid</span>`
-        : `<span class="mc-status" style="color:#F59E0B">⏳ Unpaid</span>`;
+      const unpaidIds    = JSON.stringify(p.unpaidIds || []);
+      const safeAgentEmail = escHtml(a.agentEmail);
+      const markPaidBtn  = !isPaid && (p.unpaidIds||[]).length > 0
+        ? `<button onclick="batchMarkReviewsPaid(${unpaidIds},'${safeAgentEmail}','${formatMonthLabel(m)}')"
+             style="margin-top:.3rem;font-size:.65rem;padding:.15rem .4rem;background:#EEF2FF;color:#4F46E5;
+                    border:1px solid #C7D2FE;border-radius:.35rem;cursor:pointer;white-space:nowrap">
+             💳 Mark Paid
+           </button>`
+        : '';
+      const paidNote = isPaid && p.paidCount < p.count
+        ? `<div style="font-size:.65rem;color:#94A3B8">${p.paidCount}/${p.count} paid</div>` : '';
       return `<td class="mom-month-cell ${isPaid ? 'paid-cell' : ''}" style="text-align:center">
         <div class="mc-reviews">${p.count} review${p.count !== 1 ? 's' : ''}</div>
         <div class="mc-bonus">$${p.total}</div>
         <div class="mc-tier">${escHtml(p.tier)}</div>
-        ${statusDot}
+        <div class="mc-status">${isPaid ? '<span style="color:#10B981">✅ Paid</span>' : '<span style="color:#F59E0B">⏳ Unpaid</span>'}</div>
+        ${paidNote}${markPaidBtn}
       </td>`;
     }).join('');
 
@@ -3131,14 +3171,17 @@ function renderMoMTable(rows) {
     </tr>`;
   }).join('');
 
-  // ── Column totals row ─────────────────────────────────────────────────────────
+  // ── Column totals row — built from agentMap (not Payouts sheet) so all months show ──
   const grandTotal = agents.reduce((s, a) =>
     s + Object.values(a.months).reduce((ss, p) => ss + Number(p.total || 0), 0), 0);
   const monthTotalCols = months.map(m => {
-    const t = rows.filter(r => (r.month||'').substring(0,7) === m).reduce((s,r) => s + Number(r.total||0), 0);
-    const n = rows.filter(r => (r.month||'').substring(0,7) === m).length;
+    const agentsInMonth = agents.filter(a => a.months[m]);
+    const t = agentsInMonth.reduce((s, a) => s + Number(a.months[m].total || 0), 0);
+    const n = agentsInMonth.length;
+    const reviews = agentsInMonth.reduce((s, a) => s + Number(a.months[m].count || 0), 0);
     return `<td class="mom-month-cell" style="text-align:center;background:#F8FAFC;font-weight:700;border-top:2px solid #E2E8F0">
       <div style="color:#1E1B4B">$${t}</div>
+      <div style="font-size:.7rem;color:#64748B">${reviews} reviews</div>
       <div style="font-size:.7rem;color:#94A3B8">${n} agent${n !== 1 ? 's' : ''}</div>
     </td>`;
   }).join('');
