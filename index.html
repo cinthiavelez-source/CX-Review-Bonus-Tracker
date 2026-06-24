@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-06-24-b -->
+<!-- v2026-06-24-c -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -2760,6 +2760,8 @@ function renderPayoutTable(rows, grandTotal, month, cycleInfo) {
   renderPayoutRows(normalized, grandTotal, month);
   // Re-render summary cards so the month breakdown highlights the active month
   if (cachedAllPayouts.length) renderPayoutSummary(cachedAllPayouts);
+  // Sync outstanding card from accurate source if already loaded
+  if (cachedOutstanding) syncOutstandingCard(cachedOutstanding);
 }
 
 function renderPayoutRows(normalized, grandTotal, month) {
@@ -3010,17 +3012,65 @@ function renderMoMTable(rows) {
   wrap.style.display  = '';
   empty.style.display = 'none';
 
-  // ── Build pivot: agent → month → data ───────────────────────────────────────
-  const agentMap = {};   // agentEmail → { agentName, ripplingId, months: { YYYY-MM: row } }
-  const monthSet = new Set();
+  // ── Build pivot from TWO sources ─────────────────────────────────────────────
+  // Source A: cachedAllPayouts (Payouts sheet) — has official payment status
+  // Source B: cachedData (review-level) — has ALL months, even unpaid ones with no Payouts row
+  // Merge: review data fills in months missing from Payouts sheet;
+  //        Payouts sheet provides payment status overlay.
 
+  // Index Payouts sheet rows by agentEmail+month for quick lookup
+  const payoutsIndex = {};  // `${ae}|${month}` → row
   rows.forEach(p => {
     const ae = (p.agentEmail || '').toLowerCase();
     const m  = (p.month || '').substring(0, 7);
+    if (ae && m) payoutsIndex[`${ae}|${m}`] = p;
+  });
+
+  // Build agent×month counts from review-level data (valid reviews only)
+  const reviewCounts = {};  // agentEmail → { month → { count, agentName, ripplingId } }
+  cachedData.filter(r => r.finalStatus === 'Valid').forEach(r => {
+    const ae = (r.agentEmail || '').toLowerCase();
+    const m  = (r.month || '').substring(0, 7);
     if (!ae || !m) return;
-    monthSet.add(m);
-    if (!agentMap[ae]) agentMap[ae] = { agentEmail: ae, agentName: p.agentName || ae, ripplingId: p.ripplingId || '', months: {} };
-    agentMap[ae].months[m] = p;
+    if (!reviewCounts[ae]) reviewCounts[ae] = {};
+    if (!reviewCounts[ae][m]) reviewCounts[ae][m] = {
+      count: 0, agentName: r.agentName || ae, ripplingId: r.ripplingId || ''
+    };
+    reviewCounts[ae][m].count++;
+  });
+
+  const agentMap = {};   // agentEmail → { agentName, ripplingId, months: { YYYY-MM: row } }
+  const monthSet = new Set();
+
+  Object.entries(reviewCounts).forEach(([ae, months]) => {
+    Object.entries(months).forEach(([m, info]) => {
+      monthSet.add(m);
+      if (!agentMap[ae]) agentMap[ae] = {
+        agentEmail: ae,
+        agentName:  info.agentName,
+        ripplingId: info.ripplingId,
+        months: {}
+      };
+      const payoutRow = payoutsIndex[`${ae}|${m}`];
+      // Build a synthetic row: review count from review data, payment status from Payouts sheet
+      const totalCount = Object.values(reviewCounts[ae]).reduce((s, d) => s + d.count, 0);
+      const rate  = getBonusRateFE(totalCount);   // combined-month tier
+      const tier  = getBonusTierLabelFE(totalCount);
+      agentMap[ae].months[m] = {
+        count:      info.count,
+        total:      info.count * rate,
+        rate,
+        tier,
+        paidStatus: payoutRow?.paidStatus || (
+          // If no Payouts row: infer from individual reviews
+          cachedData.filter(r => (r.agentEmail||'').toLowerCase() === ae
+            && (r.month||'').substring(0,7) === m
+            && r.finalStatus === 'Valid'
+            && r.paidStatus === 'Paid').length === info.count ? 'Paid' : 'Unpaid'
+        ),
+        paidDate:   payoutRow?.paidDate || ''
+      };
+    });
   });
 
   // Months sorted newest → oldest (columns)
@@ -3948,6 +3998,21 @@ function reasonText(r) {
   return r.aiNotes ? safeStr(r.aiNotes).split(' | ')[0].trim() : '—';
 }
 
+// Frontend mirrors of getBonusRate / getBonusTierLabel from Code.gs
+// Keep in sync with backend tier thresholds whenever they change.
+function getBonusRateFE(count) {
+  if (count >= 10) return 10;
+  if (count >= 5)  return 7;
+  if (count >= 1)  return 5;
+  return 0;
+}
+function getBonusTierLabelFE(count) {
+  if (count >= 10) return 'Tier 3 ($10/review)';
+  if (count >= 5)  return 'Tier 2 ($7/review)';
+  if (count >= 1)  return 'Tier 1 ($5/review)';
+  return 'No tier';
+}
+
 function formatDate(iso) {
   if (!iso) return '—';
   try {
@@ -4048,9 +4113,50 @@ async function loadOutstandingSummary() {
     const data = await apiPost({ action: 'getUnpaidSummary' });
     cachedOutstanding = data;
     renderOutstandingSummary(data);
+    // Sync the Outstanding summary card so it matches the panel (same source)
+    syncOutstandingCard(data);
   } catch (err) {
     loading.style.display = 'none';
     list.innerHTML = `<p style="color:#EF4444;padding:1rem">${err.message}</p>`;
+  }
+}
+
+// Push getUnpaidSummary result into the top summary card so all three sources agree
+function syncOutstandingCard(data) {
+  const outstandingEl  = document.getElementById('payout-outstanding');
+  const subEl          = document.getElementById('payout-outstanding-sub');
+  const breakdownEl    = document.getElementById('payout-outstanding-breakdown');
+  if (!outstandingEl || !data) return;
+
+  const grandTotal  = data.grandTotal || 0;
+  const totalReviews = (data.agents || []).reduce((s, a) => s + (a.totalUnpaid || 0), 0);
+  outstandingEl.textContent = `$${grandTotal}`;
+  if (subEl) subEl.textContent = `${totalReviews} unpaid review${totalReviews !== 1 ? 's' : ''}`;
+
+  // Show per-month breakdown in the card
+  if (breakdownEl) {
+    const byMonth = {};
+    (data.agents || []).forEach(a => {
+      (a.months || []).forEach(md => {
+        if (!byMonth[md.month]) byMonth[md.month] = { total: 0, count: 0 };
+        byMonth[md.month].total += md.bonus || 0;
+        byMonth[md.month].count += md.count || 0;
+      });
+    });
+    const selectedMonth = document.getElementById('payout-month')?.value || '';
+    const sortedMonths = Object.keys(byMonth).sort().reverse();
+    if (!sortedMonths.length) { breakdownEl.innerHTML = ''; return; }
+    breakdownEl.innerHTML = sortedMonths.map(m => {
+      const d = byMonth[m];
+      const isSel = m === selectedMonth;
+      return `<div style="font-size:.72rem;display:flex;justify-content:space-between;gap:.75rem;
+          padding:.1rem .3rem;border-radius:.3rem;
+          background:${isSel ? 'rgba(0,0,0,.07)' : 'transparent'};
+          font-weight:${isSel ? '700' : '400'}">
+        <span>${formatMonthLabel(m)}${isSel ? ' ←' : ''}</span>
+        <span style="color:#B45309">$${d.total} · ${d.count} review${d.count !== 1 ? 's' : ''}</span>
+      </div>`;
+    }).join('');
   }
 }
 
