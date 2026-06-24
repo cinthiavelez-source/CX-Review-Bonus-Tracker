@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-r -->
+<!-- v2026-05-27-s -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -2533,21 +2533,36 @@ let cachedAllReviewsRows_ = [];
 let cachedMyReviewsRows_  = [];
 let cachedLeaderboardRows_ = [];
 
-// Mark a single review as paid (review-level, stored on the review row itself).
-// One-way: once paid, the button becomes a static ✅ badge with no edit option.
+// Mark a single review as paid — OPTIMISTIC UI:
+// 1. Instantly flips the local cache → re-renders the row (💳 → ✅ badge, zero wait)
+// 2. Fires the API call silently in the background
+// 3. On failure: rolls back the local change and shows an error toast
 async function markReviewPaid(reviewId) {
   if (!confirm('Mark this review as paid? This cannot be undone.')) return;
-  showLoading(true, 'Marking review as paid…');
+
+  // Step 1: optimistic local update — instant, no spinner
+  const record = cachedData.find(r => String(r.id) === String(reviewId));
+  if (!record) { showToast('Review not found in local cache.', '#EF4444'); return; }
+  const prevPaidStatus = record.paidStatus || '';
+  const prevPaidDate   = record.paidDate   || '';
+  const prevPaidBy     = record.paidBy     || '';
+  record.paidStatus = 'Paid';
+  record.paidDate   = new Date().toISOString();
+  record.paidBy     = getUser()?.email || '';
+  renderAllReviews();   // instant re-render — button is now a ✅ badge
+
+  // Step 2: persist to backend silently in background
   try {
     await apiPost({ action: 'markReviewPaid', id: reviewId });
     logAudit('MARK_REVIEW_PAID', `Marked review ${reviewId} as paid`);
-    showToast('✅ Review marked as paid.', '#10B981');
-    await apiFetch();       // refresh all cached records so paidStatus is current
-    renderAllReviews();
+    showToast('✅ Payment saved.', '#10B981');
   } catch (err) {
-    showToast('Error: ' + err.message, '#EF4444');
-  } finally {
-    showLoading(false);
+    // Step 3: rollback on failure
+    record.paidStatus = prevPaidStatus;
+    record.paidDate   = prevPaidDate;
+    record.paidBy     = prevPaidBy;
+    renderAllReviews();
+    showToast('❌ Could not save: ' + err.message + ' — reverted.', '#EF4444');
   }
 }
 
