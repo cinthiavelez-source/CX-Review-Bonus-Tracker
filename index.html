@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-s -->
+<!-- v2026-05-27-v -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -237,6 +237,45 @@
       .charts-grid, .form-grid { grid-template-columns: 1fr; }
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
     }
+
+    /* Outstanding summary agent cards */
+    .outstanding-agent-card {
+      border: 1.5px solid #E5E7EB;
+      border-radius: .85rem;
+      margin-bottom: 1rem;
+      overflow: hidden;
+      transition: box-shadow .15s;
+    }
+    .outstanding-agent-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+    .outstanding-agent-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: .85rem 1rem;
+      background: #F8FAFC;
+      border-bottom: 1px solid #E5E7EB;
+      gap: .75rem;
+      flex-wrap: wrap;
+    }
+    .outstanding-agent-info { display: flex; flex-direction: column; gap: .15rem; }
+    .outstanding-agent-name { font-weight: 700; color: #1E1B4B; font-size: .92rem; }
+    .outstanding-agent-meta { font-size: .76rem; color: #64748B; display: flex; gap: .75rem; flex-wrap: wrap; }
+    .outstanding-agent-total { display: flex; flex-direction: column; align-items: flex-end; gap: .3rem; }
+    .outstanding-agent-total-amount { font-size: 1.1rem; font-weight: 800; color: #DC2626; }
+    .outstanding-month-row {
+      display: grid;
+      grid-template-columns: 100px 1fr 1fr 1fr auto;
+      align-items: center;
+      padding: .6rem 1rem;
+      border-bottom: 1px solid #F1F5F9;
+      font-size: .83rem;
+      gap: .5rem;
+    }
+    .outstanding-month-row:last-child { border-bottom: none; }
+    .outstanding-month-label { font-weight: 700; color: #374151; }
+    .outstanding-month-reviews { color: #4F46E5; font-weight: 600; }
+    .outstanding-month-tier { }
+    .outstanding-month-bonus { font-weight: 700; color: #059669; }
   </style>
 </head>
 <body>
@@ -687,6 +726,26 @@
       </div>
     </div>
 
+        <!-- Outstanding Unpaid Reviews — cross-month summary -->
+        <div class="card" id="outstanding-card">
+          <div class="card-title" style="justify-content:space-between;align-items:center">
+            <span>📋 Outstanding Unpaid Reviews</span>
+            <div style="display:flex;gap:.5rem;align-items:center">
+              <span id="outstanding-grand-total" style="font-size:1rem;font-weight:800;color:#DC2626;display:none"></span>
+              <button class="btn btn-secondary btn-sm" onclick="loadOutstandingSummary()">↻ Refresh</button>
+            </div>
+          </div>
+          <p style="font-size:.83rem;color:#64748B;margin-bottom:1rem">
+            All valid reviews not yet marked as paid — across every month. Use the 💳 buttons in All Reviews, or click "Mark All Paid" per agent below.
+          </p>
+          <div id="outstanding-empty" class="empty-state" style="padding:1.5rem">
+            <div class="icon">🎉</div>
+            <p>All reviews are paid! Nothing outstanding.</p>
+          </div>
+          <div id="outstanding-loading" style="display:none;text-align:center;padding:2rem;color:#94A3B8;font-size:.9rem">Loading…</div>
+          <div id="outstanding-list"></div>
+        </div>
+
     <!-- Payment History — Month over Month -->
     <div class="card">
       <div class="card-title" style="justify-content:space-between">
@@ -935,8 +994,8 @@ const DEFAULT_ADMIN_EMAIL = 'cinthiavelez@cookunity.com';
 
 const USER_KEY       = 'cx_tracker_user_v1';
 const CFG_KEY        = 'cx_tracker_cfg_v1';
-const DATA_CACHE_KEY = 'cx_tracker_data_v2';   // bump version to bust old caches
-const DATA_CACHE_TTL = 3 * 60 * 1000;          // show cached data for up to 3 min
+const DATA_CACHE_KEY = 'cx_tracker_data_v3';   // bump version to bust old caches
+const DATA_CACHE_TTL = 24 * 60 * 60 * 1000;   // 24h — stale-while-revalidate; bg refresh always runs
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let cachedData              = [];   // all review records
@@ -1194,14 +1253,17 @@ async function initApp() {
   const hasCached = loadDataCache();
   if (hasCached) {
     updateRoleUI();
-    renderDashboard();
-    // Refresh silently in background — no spinner, no blocking
+    renderPage(currentPage);   // paint whatever page user is on — instant, no spinner
+    // Refresh silently in background — no blocking, no full-page spinner
     apiFetchSilent().then(() => renderPage(currentPage));
   } else {
-    // First ever load — show spinner normally
-    await apiFetch();
+    // Truly first ever load (no cache at all) — must fetch, show minimal inline indicator
+    setSyncStatus('syncing');
+    try {
+      await apiFetchSilent();  // use silent fetch (no full-page spinner) even on first load
+    } catch (e) { /* errors already handled inside apiFetchSilent */ }
     updateRoleUI();
-    renderDashboard();
+    renderPage(currentPage);
   }
 
   // Background poll every 2 minutes
@@ -1214,8 +1276,10 @@ function loadDataCache() {
     const raw = localStorage.getItem(DATA_CACHE_KEY);
     if (!raw) return false;
     const cached = JSON.parse(raw);
-    if (!cached || !cached.cachedAt) return false;
-    if (Date.now() - cached.cachedAt > DATA_CACHE_TTL) return false; // stale
+    // Always use cached data if records exist — stale-while-revalidate pattern.
+    // Background refresh (apiFetchSilent) runs immediately after, so data is never
+    // more than a few seconds out of date in practice.
+    if (!cached || !Array.isArray(cached.records)) return false;
     applyData(cached);
     return true;
   } catch (e) { return false; }
@@ -2228,6 +2292,7 @@ function renderPayoutEmpty() {
   document.getElementById('payout-total-banner').style.display = 'none';
   document.getElementById('payout-body').innerHTML = '';
   loadAllPayoutHistory(); // always refresh MoM history when page opens
+  loadOutstandingSummary(); // load unpaid summary across all months
 
   // Agents: auto-load their own payout for the selected month
   if (isAgent) autoLoadAgentPayout();
@@ -2568,7 +2633,8 @@ async function markReviewPaid(reviewId) {
 
 // Toggle payment status for a single agent in the current month view (Payouts tab)
 async function togglePaid(month, agentEmail, newStatus) {
-  showLoading(true, newStatus === 'Paid' ? 'Marking as paid…' : 'Reverting payment…');
+  // No full-page spinner — just a toast so the UI stays responsive
+  showToast(newStatus === 'Paid' ? '💾 Saving payment…' : '💾 Reverting…', '#6366F1');
   try {
     await apiPost({ action: 'markAsPaid', entries: [{ month, agentEmail }], paidStatus: newStatus });
     logAudit('MARK_PAID', `${newStatus === 'Paid' ? 'Marked paid' : 'Reverted to Unpaid'} — ${agentEmail} for ${month}`);
@@ -2577,8 +2643,6 @@ async function togglePaid(month, agentEmail, newStatus) {
     loadAllPayoutHistory(); // refresh MoM table
   } catch (err) {
     showToast('Error: ' + err.message, '#EF4444');
-  } finally {
-    showLoading(false);
   }
 }
 
@@ -3531,6 +3595,126 @@ function closeModal(id) {
 document.querySelectorAll('.modal-overlay').forEach(el => {
   el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
 });
+
+// ── Outstanding Unpaid Reviews summary ────────────────────────────────────────
+let cachedOutstanding = null;
+
+async function loadOutstandingSummary() {
+  const list = document.getElementById('outstanding-list');
+  const empty = document.getElementById('outstanding-empty');
+  const loading = document.getElementById('outstanding-loading');
+  if (!list) return;
+
+  loading.style.display = 'block';
+  list.innerHTML = '';
+  empty.style.display = 'none';
+
+  try {
+    const data = await apiPost({ action: 'getUnpaidSummary' });
+    cachedOutstanding = data;
+    renderOutstandingSummary(data);
+  } catch (err) {
+    loading.style.display = 'none';
+    list.innerHTML = `<p style="color:#EF4444;padding:1rem">${err.message}</p>`;
+  }
+}
+
+function renderOutstandingSummary(data) {
+  const list    = document.getElementById('outstanding-list');
+  const empty   = document.getElementById('outstanding-empty');
+  const loading = document.getElementById('outstanding-loading');
+  const gtEl    = document.getElementById('outstanding-grand-total');
+  if (!list) return;
+
+  loading.style.display = 'none';
+  if (!data.agents || !data.agents.length) {
+    empty.style.display = '';
+    list.innerHTML = '';
+    if (gtEl) gtEl.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  if (gtEl) {
+    gtEl.textContent = `$${data.grandTotal} outstanding`;
+    gtEl.style.display = '';
+  }
+
+  list.innerHTML = data.agents.map(agent => {
+    const safeEmail = escHtml(agent.agentEmail || '');
+    const monthRows = agent.months.map(m => {
+      return `
+        <div class="outstanding-month-row">
+          <span class="outstanding-month-label">${formatMonthLabel(m.month)}</span>
+          <span class="outstanding-month-reviews">📄 ${m.count} review${m.count !== 1 ? 's' : ''} to pay</span>
+          <span class="outstanding-month-tier"><span style="background:#EEF2FF;color:#4F46E5;padding:.15rem .45rem;border-radius:.35rem;font-size:.75rem;font-weight:600">${escHtml(m.tier)}</span></span>
+          <span class="outstanding-month-bonus">$${m.bonus}</span>
+          <button class="btn btn-secondary btn-sm" style="font-size:.72rem;padding:.2rem .5rem;white-space:nowrap"
+            onclick="batchMarkReviewsPaid(${JSON.stringify(m.ids)}, '${safeEmail}', '${formatMonthLabel(m.month)}')">
+            💳 Pay ${formatMonthLabel(m.month)}
+          </button>
+        </div>`;
+    }).join('');
+
+    const allAgentIds = agent.months.flatMap(m => m.ids);
+
+    return `
+      <div class="outstanding-agent-card" id="outstanding-agent-${safeEmail.replace(/[@.]/g,'-')}">
+        <div class="outstanding-agent-header">
+          <div class="outstanding-agent-info">
+            <div class="outstanding-agent-name">👤 ${escHtml(agent.agentName)}</div>
+            <div class="outstanding-agent-meta">
+              <span>${safeEmail}</span>
+              ${agent.ripplingId ? `<span>Rippling: <strong>${escHtml(String(agent.ripplingId))}</strong></span>` : ''}
+              <span>${agent.totalUnpaid} review${agent.totalUnpaid !== 1 ? 's' : ''} unpaid across ${agent.months.length} month${agent.months.length !== 1 ? 's' : ''}</span>
+            </div>
+          </div>
+          <div class="outstanding-agent-total">
+            <div class="outstanding-agent-total-amount">$${agent.totalBonus}</div>
+            <button class="btn btn-primary btn-sm" style="font-size:.75rem"
+              onclick="batchMarkReviewsPaid(${JSON.stringify(allAgentIds)}, '${safeEmail}', 'all months')">
+              ✅ Mark All Paid
+            </button>
+          </div>
+        </div>
+        ${monthRows}
+      </div>`;
+  }).join('');
+}
+
+async function batchMarkReviewsPaid(ids, agentEmail, label) {
+  if (!ids || !ids.length) return;
+  if (!confirm(`Mark ${ids.length} review${ids.length !== 1 ? 's' : ''} as paid for ${label}? This cannot be undone.`)) return;
+
+  const now     = new Date().toISOString();
+  const userEmail = getUser()?.email || '';
+  const idSet   = new Set(ids.map(String));
+  cachedData.forEach(r => {
+    if (idSet.has(String(r.id))) {
+      r.paidStatus = 'Paid';
+      r.paidDate   = now;
+      r.paidBy     = userEmail;
+    }
+  });
+
+  const cardId = 'outstanding-agent-' + agentEmail.replace(/[@.]/g, '-');
+  const card = document.getElementById(cardId);
+  if (card) card.style.opacity = '.4';
+
+  showToast(`✅ Marking ${ids.length} reviews as paid…`, '#10B981');
+
+  try {
+    const res = await apiPost({ action: 'batchMarkReviewsPaid', ids });
+    logAudit('BATCH_MARK_PAID', `Batch marked ${res.marked || ids.length} reviews paid for ${agentEmail} — ${label}`);
+    showToast(`✅ ${res.marked || ids.length} reviews marked as paid.`, '#10B981');
+    await loadOutstandingSummary();
+  } catch (err) {
+    cachedData.forEach(r => {
+      if (idSet.has(String(r.id))) { r.paidStatus = ''; r.paidDate = ''; r.paidBy = ''; }
+    });
+    if (card) card.style.opacity = '1';
+    showToast('❌ Error: ' + err.message, '#EF4444');
+  }
+}
 </script>
 </body>
 </html>
