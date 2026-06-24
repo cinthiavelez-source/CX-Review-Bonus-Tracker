@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-v -->
+<!-- v2026-05-27-x -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -1746,8 +1746,8 @@ async function submitReview(e) {
     }
 
     clearSubmitForm();
-    await apiFetch();
     navTo('reviews');
+    apiFetchSilent().then(() => renderReviews()); // refresh in background — no blocking
   } catch (err) {
     // Generic error handler
     showToast('❌ Error: ' + err.message, '#EF4444');
@@ -1860,16 +1860,26 @@ function renderReviews() {
 
 async function revalidate(id, url, platform) {
   if (!confirm('Re-run AI validation for this review?')) return;
-  showLoading(true, 'Running AI validation…');
+
+  const record = cachedData.find(r => String(r.id) === String(id));
+  if (!record) { showToast('Record not found.', '#EF4444'); return; }
+
+  const snap = { aiStatus: record.aiStatus, finalStatus: record.finalStatus, aiNotes: record.aiNotes };
+  record.aiStatus   = 'Pending';
+  record.finalStatus = 'Pending';
+  renderReviews(); renderAllReviews();
+  showToast('🔄 AI validation running…', '#4F46E5');
+
   try {
     await apiPost({ action: 'validateReview', id, screenshotUrl: url, platform });
-    showToast('🔄 Re-validation complete. Refreshing…', '#4F46E5');
-    await apiFetch();
-    renderReviews();
+    // Fetch the real result silently — AI validation changes finalStatus server-side
+    await apiFetchSilent();
+    renderReviews(); renderAllReviews(); renderDashboard();
+    showToast('✅ Re-validation complete.', '#10B981');
   } catch (err) {
-    showToast('Error: ' + err.message, '#EF4444');
-  } finally {
-    showLoading(false);
+    Object.assign(record, snap);
+    renderReviews(); renderAllReviews();
+    showToast('❌ Re-validation failed: ' + err.message, '#EF4444');
   }
 }
 
@@ -1884,53 +1894,68 @@ async function confirmOverride() {
   const status = document.getElementById('override-status').value;
   const note   = document.getElementById('override-note').value.trim();
   closeModal('override-modal');
-  showLoading(true, 'Saving override…');
+
+  const record = cachedData.find(r => String(r.id) === String(id));
+  if (!record) { showToast('Record not found.', '#EF4444'); return; }
+
+  const snap = { finalStatus: record.finalStatus, aiNotes: record.aiNotes, bonusRate: record.bonusRate, bonusAmount: record.bonusAmount };
+  record.finalStatus = status;
+  if (note) record.aiNotes = (record.aiNotes ? record.aiNotes + ' | ' : '') + `[Override → ${status}: ${note}]`;
+  renderReviews(); renderAllReviews(); renderDashboard();
+  showToast('✅ Override saved.', '#10B981');
+
   try {
     await apiPost({ action: 'overrideValidation', id, finalStatus: status, overrideNote: note });
-    showToast('✅ Override saved.', '#10B981');
     logAudit('OVERRIDE_STATUS', `Overrode review ${id} → ${status}${note ? ` (note: ${note})` : ''}`);
-    await apiFetch();
-    renderReviews();
-    renderDashboard();
+    // Silently refresh so bonusRate recalculation from server is picked up
+    apiFetchSilent().then(() => { renderReviews(); renderAllReviews(); renderDashboard(); });
   } catch (err) {
-    showToast('Error: ' + err.message, '#EF4444');
-  } finally {
-    showLoading(false);
+    Object.assign(record, snap);
+    renderReviews(); renderAllReviews(); renderDashboard();
+    showToast('❌ Override failed: ' + err.message + ' — reverted.', '#EF4444');
   }
 }
 
 async function deleteReview(id) {
   if (!confirm('Permanently delete this review? This cannot be undone.')) return;
-  showLoading(true, 'Deleting…');
+
+  const idx = cachedData.findIndex(r => String(r.id) === String(id));
+  if (idx === -1) { showToast('Record not found.', '#EF4444'); return; }
+  const [removed] = cachedData.splice(idx, 1);   // remove immediately
+  renderReviews(); renderAllReviews(); renderDashboard();
+  showToast('🗑️ Deleted.', '#64748B');
+
   try {
     await apiPost({ action: 'delete', id });
-    showToast('Deleted.', '#64748B');
     logAudit('DELETE_REVIEW', `Deleted review ID ${id}`);
-    await apiFetch();
-    renderReviews();
   } catch (err) {
-    showToast('Error: ' + err.message, '#EF4444');
-  } finally {
-    showLoading(false);
+    cachedData.splice(idx, 0, removed);           // restore on failure
+    renderReviews(); renderAllReviews(); renderDashboard();
+    showToast('❌ Delete failed: ' + err.message + ' — restored.', '#EF4444');
   }
 }
 
 async function quickMarkValid(id, agentName, platform) {
-  const note = prompt(`Override to Valid — optional note (e.g. "Verified manually by supervisor"):\n\nAgent: ${agentName}  |  Platform: ${platform}`, '') ;
-  if (note === null) return; // user clicked Cancel
-  showLoading(true, 'Saving override…');
+  const note = prompt(`Override to Valid — optional note (e.g. "Verified manually by supervisor"):\n\nAgent: ${agentName}  |  Platform: ${platform}`, '');
+  if (note === null) return;
+
+  const record = cachedData.find(r => String(r.id) === String(id));
+  if (!record) { showToast('Record not found.', '#EF4444'); return; }
+
+  const snap = { finalStatus: record.finalStatus, aiNotes: record.aiNotes, bonusRate: record.bonusRate, bonusAmount: record.bonusAmount };
+  record.finalStatus = 'Valid';
+  if (note) record.aiNotes = (record.aiNotes ? record.aiNotes + ' | ' : '') + `[Override → Valid: ${note || 'Supervisor override'}]`;
+  renderAllReviews(); renderReviews(); renderDashboard();
+  showToast('✅ Marked as Valid.', '#10B981');
+
   try {
     await apiPost({ action: 'overrideValidation', id, finalStatus: 'Valid', overrideNote: note || 'Supervisor override' });
-    showToast('✅ Marked as Valid.', '#10B981');
     logAudit('OVERRIDE_STATUS', `Marked review ${id} Valid — agent: ${agentName}, platform: ${platform}${note ? `, note: ${note}` : ''}`);
-    await apiFetch();
-    renderAllReviews();
-    renderReviews();
-    renderDashboard();
+    apiFetchSilent().then(() => { renderAllReviews(); renderReviews(); renderDashboard(); });
   } catch (err) {
-    showToast('Error: ' + err.message, '#EF4444');
-  } finally {
-    showLoading(false);
+    Object.assign(record, snap);
+    renderAllReviews(); renderReviews(); renderDashboard();
+    showToast('❌ Failed: ' + err.message + ' — reverted.', '#EF4444');
   }
 }
 
@@ -2321,7 +2346,8 @@ async function generatePayout() {
   const isSup = isCurrentUserSupervisor();
   if (!isAdm && !isSup) return; // agents cannot generate
   const month = document.getElementById('payout-month').value || currentMonthStr();
-  showLoading(true, 'Calculating payouts…');
+  const genBtn = document.getElementById('payout-generate-btn');
+  if (genBtn) { genBtn.textContent = '⏳ Generating…'; genBtn.disabled = true; }
   try {
     const data = await apiPost({ action: 'generatePayout', month });
     renderPayoutTable(data.payouts, data.grandTotal, month);
@@ -2334,7 +2360,7 @@ async function generatePayout() {
   } catch (err) {
     showToast('Error: ' + err.message, '#EF4444');
   } finally {
-    showLoading(false);
+    if (genBtn) { genBtn.textContent = 'Generate Report'; genBtn.disabled = false; }
   }
 }
 
@@ -2343,7 +2369,8 @@ async function loadPayoutData() {
   const isSup = isCurrentUserSupervisor();
   const isAgent = !isAdm && !isSup;
   const month = document.getElementById('payout-month').value || currentMonthStr();
-  showLoading(true, 'Loading saved payout data…');
+  const loadBtn = document.getElementById('payout-load-saved-btn');
+  if (loadBtn) { loadBtn.textContent = '⏳ Loading…'; loadBtn.disabled = true; }
   try {
     const u   = getUser();
     const url = `${scriptUrl()}?action=getPayouts&month=${encodeURIComponent(month)}&email=${encodeURIComponent(u?.email||'')}`;
@@ -2362,7 +2389,7 @@ async function loadPayoutData() {
   } catch (err) {
     showToast('Error: ' + err.message, '#EF4444');
   } finally {
-    showLoading(false);
+    if (loadBtn) { loadBtn.textContent = 'Load Saved'; loadBtn.disabled = false; }
   }
 }
 
@@ -2924,21 +2951,26 @@ function arMenuToggle_(btn) {
 // Universal reject / close-case action — works for any current status
 async function quickRejectReview_(id) {
   const note = prompt('Reason for rejecting / closing this case (optional):') ?? null;
-  if (note === null) return; // user cancelled the prompt
+  if (note === null) return;
   if (!confirm(`Reject this review and close the case?${note ? `\n\nReason: "${note}"` : ''}`)) return;
-  showLoading(true, 'Closing case…');
+
+  const record = cachedData.find(r => String(r.id) === String(id));
+  if (!record) { showToast('Record not found.', '#EF4444'); return; }
+
+  const snap = { finalStatus: record.finalStatus, aiNotes: record.aiNotes };
+  record.finalStatus = 'Rejected';
+  record.aiNotes     = (record.aiNotes ? record.aiNotes + ' | ' : '') +
+                       `[REJECT by ${getUser()?.email || 'admin'} on ${new Date().toLocaleDateString()}]${note ? ` — ${note}` : ''}`;
+  renderReviews(); renderAllReviews(); renderDashboard();
+  showToast('🚫 Case closed.', '#EF4444');
+
   try {
     await apiPost({ action: 'overrideValidation', id, finalStatus: 'Rejected', overrideNote: note || 'Closed by admin' });
     logAudit('REJECT_REVIEW', `Rejected/closed review ID ${id}${note ? ` — reason: ${note}` : ''}`);
-    showToast('🚫 Case closed and review rejected.', '#EF4444');
-    await apiFetch();
-    renderReviews();
-    renderAllReviews();
-    renderDashboard();
   } catch (err) {
-    showToast('Error: ' + err.message, '#EF4444');
-  } finally {
-    showLoading(false);
+    Object.assign(record, snap);
+    renderReviews(); renderAllReviews(); renderDashboard();
+    showToast('❌ Reject failed: ' + err.message + ' — reverted.', '#EF4444');
   }
 }
 
@@ -2948,24 +2980,36 @@ async function supervisorDecision(id, decision) {
   const label  = decision === 'approve' ? 'approve' : 'reject';
   if (!confirm(`Are you sure you want to ${label} this submission?${note ? `\n\nNote: "${note}"` : ''}`)) return;
 
-  showLoading(true, decision === 'approve' ? 'Approving & sending to AI validation…' : 'Rejecting submission…');
+  // Optimistically update the review record in cache
+  const record = cachedData.find(r => String(r.id) === String(id));
+  const snap   = record ? { finalStatus: record.finalStatus, duplicateFlag: record.duplicateFlag } : null;
+  if (record) {
+    record.finalStatus = decision === 'approve' ? 'Pending' : 'Rejected';
+    record.duplicateFlag = '';
+  }
+
+  // Remove the card from the queue UI immediately
+  if (noteEl) {
+    const card = noteEl.closest('[style*="border:1.5px solid #DDD6FE"]');
+    if (card) { card.style.transition = 'opacity .2s'; card.style.opacity = '0'; setTimeout(() => card.remove(), 200); }
+  }
+
+  showToast(
+    decision === 'approve' ? '✅ Approved — AI validation running.' : '🚫 Submission rejected.',
+    decision === 'approve' ? '#10B981' : '#EF4444'
+  );
+
   try {
     await apiPost({ action: 'supervisorReview', id, decision, supervisorNote: note });
     const decLabel = decision === 'approve' ? 'APPROVE_REVIEW' : 'REJECT_REVIEW';
     logAudit(decLabel, `${decision === 'approve' ? 'Approved' : 'Rejected'} review ID ${id}${note ? ` — note: ${note}` : ''}`);
-    showToast(
-      decision === 'approve'
-        ? '✅ Approved! AI validation will run now.'
-        : '🚫 Submission rejected and closed.',
-      decision === 'approve' ? '#10B981' : '#EF4444'
-    );
-    await apiFetch();       // refresh data
-    loadReviewQueue();      // re-render queue (removes the resolved item)
-    renderDashboard();
+    // Refresh badge count and dashboard silently
+    apiFetchSilent().then(() => { renderDashboard(); loadReviewQueue(); });
   } catch (err) {
-    showToast('Error: ' + err.message, '#EF4444');
-  } finally {
-    showLoading(false);
+    // Restore the record on failure and reload the queue
+    if (record && snap) Object.assign(record, snap);
+    showToast('❌ Decision failed: ' + err.message + ' — please try again.', '#EF4444');
+    loadReviewQueue();  // reload the queue to restore the card
   }
 }
 
@@ -3212,7 +3256,7 @@ async function saveHierarchyEntry() {
   if (!email || !name) { showToast('Email and Name are required.', '#EF4444'); return; }
   if (!email.endsWith('@cookunity.com')) { showToast('Must be a @cookunity.com email.', '#EF4444'); return; }
 
-  showLoading(true, 'Saving…');
+  showToast('💾 Saving…', '#6366F1');
   try {
     const result = await apiPost({
       action: 'saveHierarchyEntry',
@@ -3237,12 +3281,12 @@ async function saveHierarchyEntry() {
     logAudit('SAVE_HIERARCHY', `${origEmail ? 'Updated' : 'Added'} team member ${name} (${email}) as ${role}`);
   } catch(err) {
     showToast('Error: ' + err.message, '#EF4444');
-  } finally { showLoading(false); }
+  }
 }
 
 async function deleteHierarchyEntry(email, name) {
   if (!confirm(`Remove ${name || email} from the team hierarchy? They will lose access to the tracker.`)) return;
-  showLoading(true, 'Removing…');
+  showToast('💾 Removing…', '#6366F1');
   try {
     const result = await apiPost({ action: 'deleteHierarchyEntry', entryEmail: email });
     if (result.hierarchy) {
@@ -3255,7 +3299,7 @@ async function deleteHierarchyEntry(email, name) {
     logAudit('DELETE_HIERARCHY', `Removed team member ${name || email} from hierarchy`);
   } catch(err) {
     showToast('Error: ' + err.message, '#EF4444');
-  } finally { showLoading(false); }
+  }
 }
 
 // ── HIERARCHY CSV IMPORT / EXPORT ─────────────────────────────────────────────
@@ -3362,7 +3406,7 @@ function prepareHierarchyImport(text) {
 async function confirmHierarchyImport() {
   if (!hierImportRows.length) return;
   const mode = document.querySelector('input[name="hier-import-mode"]:checked')?.value || 'merge';
-  showLoading(true, `Importing ${hierImportRows.length} rows…`);
+  showToast('💾 Importing...', '#6366F1');
   try {
     const result = await apiPost({ action: 'bulkImportHierarchy', mode, rows: hierImportRows });
     if (result.hierarchy) cachedHierarchy = result.hierarchy;
@@ -3373,7 +3417,7 @@ async function confirmHierarchyImport() {
     logAudit('IMPORT_HIERARCHY', `Bulk imported ${importCount} team members (mode: ${mode})`);
   } catch(err) {
     showToast('Import error: ' + err.message, '#EF4444');
-  } finally { showLoading(false); }
+  }
 }
 
 function cancelHierarchyImport() {
