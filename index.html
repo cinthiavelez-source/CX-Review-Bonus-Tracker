@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-q -->
+<!-- v2026-05-27-r -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -413,6 +413,21 @@
   <!-- ── SUBMIT REVIEW ── -->
   <div class="page" id="page-submit">
     <div class="page-title"><span>📝</span> Submit a Review</div>
+
+    <!-- Payroll lock banner — shown automatically on days 26–31 -->
+    <div id="submit-lock-banner" style="display:none;background:linear-gradient(135deg,#FEF2F2,#FFF7ED);border:2px solid #FECACA;border-radius:1rem;padding:1.5rem 1.75rem;margin-bottom:1.25rem;text-align:center">
+      <div style="font-size:2rem;margin-bottom:.5rem">🔒</div>
+      <div style="font-size:1.05rem;font-weight:800;color:#991B1B;margin-bottom:.5rem">Submissions closed for this month</div>
+      <div style="font-size:.9rem;color:#7F1D1D;line-height:1.6;max-width:520px;margin:0 auto">
+        Review submissions are only accepted during the <strong>first 25 days of each month</strong>.<br>
+        We are currently running payroll — new submissions will count toward <strong>next month's bonus</strong>.
+      </div>
+      <div style="margin-top:1rem;font-size:.82rem;color:#B45309;background:#FFFBEB;border:1px solid #FDE68A;border-radius:.5rem;padding:.6rem 1rem;display:inline-block">
+        📅 Submissions reopen on the <strong>1st of next month</strong>
+      </div>
+    </div>
+
+    <div id="submit-form-wrap">
     <div class="card">
       <p style="font-size:.88rem;color:#64748B;margin-bottom:1.5rem;">
         Fill in the details below. The screenshot will be validated automatically by AI — you'll see the result within seconds of submitting.
@@ -470,6 +485,7 @@
         </div>
       </form>
     </div>
+    </div><!-- /submit-form-wrap -->
 
     <!-- What happens next -->
     <div class="card" style="background:linear-gradient(135deg,#EEF2FF,#F5F3FF);border:1px solid #C7D2FE">
@@ -1295,11 +1311,26 @@ function navTo(page) {
   renderPage(page);
 }
 
+// Returns true if today is day 26–31 (submission window is days 1–25 only)
+function isSubmissionLocked() {
+  return new Date().getDate() > 25;
+}
+
+// Show/hide the payroll lock banner on the Submit page
+function applySubmissionLock() {
+  const banner   = document.getElementById('submit-lock-banner');
+  const formWrap = document.getElementById('submit-form-wrap');
+  const locked   = isSubmissionLocked();
+  if (banner)   banner.style.display   = locked ? 'block' : 'none';
+  if (formWrap) formWrap.style.display = locked ? 'none'  : 'block';
+}
+
 function renderPage(page) {
   if (page === 'dashboard')   renderDashboard();
   if (page === 'reviews')     renderReviews();
   if (page === 'leaderboard') renderLeaderboard();
   if (page === 'payout')      renderPayoutEmpty();
+  if (page === 'submit')      applySubmissionLock();
   if (page === 'admin')       { loadReviewQueue(); loadHierarchy(); loadAuditLog(); }
   if (page === 'allreviews')  {
     renderAllReviews();
@@ -1584,6 +1615,11 @@ function previewScreenshot(input) {
 
 async function submitReview(e) {
   e.preventDefault();
+  // Hard guard — double-check even if someone bypasses the UI
+  if (isSubmissionLocked()) {
+    showToast('🔒 Submissions are closed during the last 5 days of the month. Payroll is running.', '#EF4444');
+    return;
+  }
   const u   = getUser();
   const btn = document.getElementById('btn-submit');
 
