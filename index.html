@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-x -->
+<!-- v2026-05-27-y -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -238,6 +238,29 @@
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
     }
 
+    /* ── SUPERVISOR INBOX ── */
+    .inbox-group { margin-bottom: 1.5rem; }
+    .inbox-group-label { font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: #94A3B8; margin-bottom: .5rem; padding: 0 .25rem; }
+    .inbox-card {
+      background: white; border-radius: .85rem; border: 1.5px solid #E5E7EB;
+      margin-bottom: .6rem; overflow: hidden;
+      display: grid; grid-template-columns: 6px 1fr auto;
+      transition: box-shadow .15s;
+    }
+    .inbox-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+    .inbox-card-stripe { }
+    .inbox-card.priority-high  .inbox-card-stripe { background: #7C3AED; }
+    .inbox-card.priority-med   .inbox-card-stripe { background: #F59E0B; }
+    .inbox-card.priority-low   .inbox-card-stripe { background: #94A3B8; }
+    .inbox-card-body { padding: .7rem .9rem; display: flex; flex-direction: column; gap: .25rem; }
+    .inbox-card-top  { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+    .inbox-card-code { font-size: .72rem; font-weight: 700; color: #4F46E5; background: #EEF2FF; padding: .08rem .3rem; border-radius: .25rem; }
+    .inbox-card-meta { font-size: .78rem; color: #64748B; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+    .inbox-card-agent { font-weight: 700; color: #1E1B4B; font-size: .83rem; }
+    .inbox-card-reason { font-size: .76rem; color: #7C3AED; background: #F5F3FF; border-radius: .35rem; padding: .12rem .4rem; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .inbox-card-reason.invalid { color: #B45309; background: #FFFBEB; }
+    .inbox-card-actions { display: flex; align-items: center; gap: .4rem; padding: .7rem .75rem; }
+
     /* Outstanding summary agent cards */
     .outstanding-agent-card {
       border: 1.5px solid #E5E7EB;
@@ -345,6 +368,9 @@
     <button class="nav-btn" data-page="leaderboard" onclick="navTo('leaderboard')">Leaderboard</button>
     <button class="nav-btn" data-page="payout" onclick="navTo('payout')">💰 Payouts</button>
     <button class="nav-btn" data-page="allreviews" onclick="navTo('allreviews')" id="btn-allreviews">📊 All Reviews</button>
+    <button class="nav-btn" data-page="inbox" onclick="navTo('inbox')" id="btn-inbox" style="display:none;position:relative">
+      📥 Inbox<span id="inbox-nav-badge" style="display:none;position:absolute;top:-5px;right:-8px;background:#EF4444;color:white;font-size:.6rem;font-weight:800;min-width:16px;height:16px;border-radius:9999px;line-height:16px;text-align:center;padding:0 3px"></span>
+    </button>
     <button class="nav-btn" data-page="admin" onclick="navTo('admin')" id="btn-admin" style="display:none">⚙️ Admin</button>
   </div>
   <div class="nav-right">
@@ -767,6 +793,12 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- ── SUPERVISOR INBOX ── -->
+  <div class="page" id="page-inbox">
+    <div class="page-title"><span>📥</span> Supervisor Inbox</div>
+    <div id="inbox-content"></div>
   </div>
 
   <!-- ── ADMIN ── -->
@@ -1358,7 +1390,7 @@ async function apiPost(body) {
 }
 
 // ── NAVIGATION ────────────────────────────────────────────────────────────────
-const PAGES = ['dashboard','submit','reviews','leaderboard','payout','allreviews','admin'];
+const PAGES = ['dashboard','submit','reviews','leaderboard','payout','allreviews','inbox','admin'];
 
 function navTo(page) {
   currentPage = page;
@@ -1395,13 +1427,189 @@ function renderPage(page) {
   if (page === 'leaderboard') renderLeaderboard();
   if (page === 'payout')      renderPayoutEmpty();
   if (page === 'submit')      applySubmissionLock();
+  if (page === 'inbox')       renderInbox();
   if (page === 'admin')       { loadReviewQueue(); loadHierarchy(); loadAuditLog(); }
   if (page === 'allreviews')  {
     renderAllReviews();
-    // Pre-load payout history so 💳 pay buttons have real status data
     if (!cachedAllPayouts.length) {
       loadAllPayoutHistory().then(() => { if (currentPage === 'allreviews') renderAllReviews(); });
     }
+  }
+}
+
+// ── SUPERVISOR INBOX ──────────────────────────────────────────────────────────
+// Shows non-valid reviews for the supervisor's agents, grouped by urgency.
+// Admins see all non-valid reviews across all agents.
+
+const INBOX_STATUS_PRIORITY = { 'Pending Review': 0, 'Invalid': 1, 'Pending': 2 };
+const INBOX_STATUS_LABELS = {
+  'Pending Review': { label: '⚠️ Pending Review — Needs Decision',   cls: 'priority-high', badge: '#7C3AED', bg: '#F5F3FF' },
+  'Invalid':        { label: '❌ Invalid — AI Rejected',              cls: 'priority-med',  badge: '#F59E0B', bg: '#FFFBEB' },
+  'Pending':        { label: '⏳ Pending — Awaiting Validation',       cls: 'priority-low',  badge: '#94A3B8', bg: '#F8FAFC' }
+};
+
+function getInboxReviews() {
+  const INBOX_STATUSES = new Set(['Pending Review', 'Invalid', 'Pending']);
+  return cachedData.filter(r => INBOX_STATUSES.has(r.finalStatus));
+}
+
+function updateInboxBadge() {
+  const isAdm = isCurrentUserAdmin();
+  const isSup = isCurrentUserSupervisor();
+  const btn   = document.getElementById('btn-inbox');
+  const badge = document.getElementById('inbox-nav-badge');
+  if (!btn) return;
+
+  if (!isAdm && !isSup) { btn.style.display = 'none'; return; }
+  btn.style.display = '';
+
+  const count = getInboxReviews().length;
+  if (badge) {
+    badge.textContent  = count > 99 ? '99+' : String(count);
+    badge.style.display = count > 0 ? '' : 'none';
+  }
+}
+
+function renderInbox() {
+  const container = document.getElementById('inbox-content');
+  if (!container) return;
+
+  const isAdm = isCurrentUserAdmin();
+  const isSup = isCurrentUserSupervisor();
+  if (!isAdm && !isSup) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">🔒</div><p>Inbox is only available to supervisors and admins.</p></div>';
+    return;
+  }
+
+  const reviews = getInboxReviews();
+
+  if (!reviews.length) {
+    container.innerHTML = `
+      <div class="card" style="text-align:center;padding:2.5rem">
+        <div style="font-size:3rem;margin-bottom:.75rem">🎉</div>
+        <div style="font-weight:700;color:#1E1B4B;font-size:1.05rem;margin-bottom:.4rem">All clear!</div>
+        <div style="color:#64748B;font-size:.88rem">No reviews are waiting for your attention right now.</div>
+      </div>`;
+    return;
+  }
+
+  // Group by finalStatus
+  const groups = {};
+  reviews.forEach(r => {
+    const s = r.finalStatus || 'Pending';
+    if (!groups[s]) groups[s] = [];
+    groups[s].push(r);
+  });
+
+  // Sort each group newest first
+  Object.values(groups).forEach(g => g.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0)));
+
+  // Render ordered by priority
+  const statusOrder = Object.keys(INBOX_STATUS_LABELS);
+  const totalCount  = reviews.length;
+
+  let html = `
+    <div class="card" style="margin-bottom:1.25rem;background:linear-gradient(135deg,#EEF2FF,#F5F3FF);border:1px solid #C7D2FE;padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+      <div>
+        <div style="font-weight:800;color:#3730A3;font-size:1rem">${totalCount} review${totalCount !== 1 ? 's' : ''} need your attention</div>
+        <div style="font-size:.8rem;color:#6366F1;margin-top:.2rem">Review each submission and approve or reject as needed.</div>
+      </div>
+      <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+        ${statusOrder.filter(s => groups[s]).map(s => {
+          const cfg = INBOX_STATUS_LABELS[s];
+          return `<span style="background:${cfg.bg};color:${cfg.badge};border-radius:.4rem;padding:.2rem .6rem;font-size:.74rem;font-weight:700">${groups[s].length} ${s}</span>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+  statusOrder.forEach(status => {
+    const group = groups[status];
+    if (!group || !group.length) return;
+    const cfg = INBOX_STATUS_LABELS[status];
+
+    html += `<div class="inbox-group">
+      <div class="inbox-group-label">${cfg.label} (${group.length})</div>`;
+
+    group.forEach(r => {
+      const reasonTxt = reasonText(r) || '';
+      const flagCode  = r.duplicateFlag ? String(r.duplicateFlag).split(':')[0] : '';
+      const displayReason = reasonTxt || flagCode || '';
+      const reasonCls = r.finalStatus === 'Invalid' ? 'invalid' : '';
+
+      // Action buttons per status — Reject is admin-only
+      let actions = '';
+      if (r.finalStatus === 'Pending Review') {
+        // Duplicate-flagged — supervisor can approve; only admin can reject
+        actions = `
+          <textarea id="sup-note-${escHtml(r.id)}" placeholder="Optional note…" rows="1"
+            style="font-size:.75rem;border:1px solid #E2E8F0;border-radius:.4rem;padding:.25rem .45rem;width:140px;resize:none;font-family:inherit"></textarea>
+          <button class="btn btn-primary btn-sm" style="font-size:.74rem;background:#10B981;border-color:#10B981"
+            onclick="handleSupervisorDecision('${escHtml(r.id)}','approve')">✅ Approve</button>
+          ${isAdm ? `<button class="btn btn-secondary btn-sm" style="font-size:.74rem;color:#DC2626;border-color:#FECACA"
+            onclick="handleSupervisorDecision('${escHtml(r.id)}','reject')">🚫 Reject</button>` : ''}`;
+      } else if (r.finalStatus === 'Invalid') {
+        // AI rejected — supervisor can override to Valid; only admin can reject/close
+        actions = `
+          <button class="btn btn-primary btn-sm" style="font-size:.74rem;background:#10B981;border-color:#10B981"
+            onclick="inboxMarkValid('${escHtml(r.id)}','${escHtml(r.agentName||'')}','${escHtml(r.platform||'')}')">✅ Mark Valid</button>
+          ${isAdm ? `<button class="btn btn-secondary btn-sm" style="font-size:.74rem;color:#DC2626;border-color:#FECACA"
+            onclick="quickRejectReview_('${escHtml(r.id)}')">🚫 Reject</button>` : ''}`;
+      } else {
+        // Pending — waiting for AI; only admin can close/reject
+        actions = `
+          <span style="font-size:.74rem;color:#94A3B8;font-style:italic">Awaiting AI…</span>
+          ${isAdm ? `<button class="btn btn-secondary btn-sm" style="font-size:.74rem;color:#DC2626;border-color:#FECACA"
+            onclick="quickRejectReview_('${escHtml(r.id)}')">🚫 Reject</button>` : ''}`;
+      }
+
+      html += `
+        <div class="inbox-card ${cfg.cls}">
+          <div class="inbox-card-stripe"></div>
+          <div class="inbox-card-body">
+            <div class="inbox-card-top">
+              <span class="inbox-card-code">${escHtml(r.reviewCode || r.id)}</span>
+              <span class="inbox-card-agent">👤 ${escHtml(r.agentName || r.agentEmail || '—')}</span>
+              <span class="inbox-card-meta">
+                <span>📅 ${formatDate(r.registrationDate || r.submittedAt || '')}</span>
+                <span>🏷️ ${escHtml(r.platform || '—')}</span>
+                <span>🎫 #${escHtml(r.ticketId || '—')}</span>
+                ${r.customerName ? `<span>👤 ${escHtml(r.customerName)}</span>` : ''}
+              </span>
+            </div>
+            ${displayReason ? `<div class="inbox-card-reason ${reasonCls}" title="${escHtml(displayReason)}">${escHtml(displayReason)}</div>` : ''}
+          </div>
+          <div class="inbox-card-actions">${actions}</div>
+        </div>`;
+    });
+
+    html += `</div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+// Wrapper around quickMarkValid specifically for inbox — re-renders inbox after success
+async function inboxMarkValid(id, agentName, platform) {
+  const note = prompt(`Override to Valid — optional note:\n\nAgent: ${agentName}  |  Platform: ${platform}`, '');
+  if (note === null) return;
+
+  const record = cachedData.find(r => String(r.id) === String(id));
+  if (!record) { showToast('Record not found.', '#EF4444'); return; }
+
+  const snap = { finalStatus: record.finalStatus, aiNotes: record.aiNotes, bonusRate: record.bonusRate };
+  record.finalStatus = 'Valid';
+  if (note || true) record.aiNotes = (record.aiNotes ? record.aiNotes + ' | ' : '') + `[Override → Valid: ${note || 'Supervisor override'}]`;
+  renderInbox(); renderAllReviews(); renderDashboard(); updateInboxBadge();
+  showToast('✅ Marked as Valid.', '#10B981');
+
+  try {
+    await apiPost({ action: 'overrideValidation', id, finalStatus: 'Valid', overrideNote: note || 'Supervisor override' });
+    logAudit('OVERRIDE_STATUS', `Inbox: marked review ${id} Valid — ${agentName}, ${platform}${note ? `, note: ${note}` : ''}`);
+    apiFetchSilent().then(() => { renderInbox(); renderAllReviews(); renderDashboard(); updateInboxBadge(); });
+  } catch (err) {
+    Object.assign(record, snap);
+    renderInbox(); renderAllReviews(); renderDashboard(); updateInboxBadge();
+    showToast('❌ Failed: ' + err.message + ' — reverted.', '#EF4444');
   }
 }
 
@@ -2079,8 +2287,8 @@ function renderAllReviews() {
       return '';
     })();
 
-    // Reject button (inline, always visible for non-rejected)
-    const rejectBtn = (isAdm || isSup) && r.finalStatus !== 'Rejected'
+    // Reject button — admin-only
+    const rejectBtn = isAdm && r.finalStatus !== 'Rejected'
       ? `<button class="ar-act-btn danger" title="Reject & close case" onclick="quickRejectReview_('${r.id}')">🚫</button>`
       : '';
 
@@ -2948,8 +3156,9 @@ function arMenuToggle_(btn) {
   }
 }
 
-// Universal reject / close-case action — works for any current status
+// Universal reject / close-case action — admin-only
 async function quickRejectReview_(id) {
+  if (!isCurrentUserAdmin()) { showToast('⛔ Only admins can reject reviews.', '#EF4444'); return; }
   const note = prompt('Reason for rejecting / closing this case (optional):') ?? null;
   if (note === null) return;
   if (!confirm(`Reject this review and close the case?${note ? `\n\nReason: "${note}"` : ''}`)) return;
@@ -2961,7 +3170,7 @@ async function quickRejectReview_(id) {
   record.finalStatus = 'Rejected';
   record.aiNotes     = (record.aiNotes ? record.aiNotes + ' | ' : '') +
                        `[REJECT by ${getUser()?.email || 'admin'} on ${new Date().toLocaleDateString()}]${note ? ` — ${note}` : ''}`;
-  renderReviews(); renderAllReviews(); renderDashboard();
+  renderReviews(); renderAllReviews(); renderDashboard(); renderInbox(); updateInboxBadge();
   showToast('🚫 Case closed.', '#EF4444');
 
   try {
@@ -2969,7 +3178,7 @@ async function quickRejectReview_(id) {
     logAudit('REJECT_REVIEW', `Rejected/closed review ID ${id}${note ? ` — reason: ${note}` : ''}`);
   } catch (err) {
     Object.assign(record, snap);
-    renderReviews(); renderAllReviews(); renderDashboard();
+    renderReviews(); renderAllReviews(); renderDashboard(); renderInbox(); updateInboxBadge();
     showToast('❌ Reject failed: ' + err.message + ' — reverted.', '#EF4444');
   }
 }
@@ -3004,7 +3213,7 @@ async function supervisorDecision(id, decision) {
     const decLabel = decision === 'approve' ? 'APPROVE_REVIEW' : 'REJECT_REVIEW';
     logAudit(decLabel, `${decision === 'approve' ? 'Approved' : 'Rejected'} review ID ${id}${note ? ` — note: ${note}` : ''}`);
     // Refresh badge count and dashboard silently
-    apiFetchSilent().then(() => { renderDashboard(); loadReviewQueue(); });
+    apiFetchSilent().then(() => { renderDashboard(); loadReviewQueue(); renderInbox(); updateInboxBadge(); });
   } catch (err) {
     // Restore the record on failure and reload the queue
     if (record && snap) Object.assign(record, snap);
@@ -3498,17 +3707,8 @@ function updateRoleUI() {
     }
   }
 
-  // Notification dot on All Reviews button for supervisors with pending items
-  if (isSup && allReviewsBtn) {
-    const pendingCount = cachedData.filter(r => r.finalStatus === 'Pending Review').length;
-    const existing = allReviewsBtn.querySelector('.sup-notif');
-    if (existing) existing.remove();
-    if (pendingCount > 0) {
-      allReviewsBtn.insertAdjacentHTML('beforeend',
-        `<span class="sup-notif" style="background:#EF4444;color:white;border-radius:9999px;font-size:.68rem;font-weight:700;padding:.1rem .45rem;margin-left:.35rem;vertical-align:middle">${pendingCount}</span>`
-      );
-    }
-  }
+  // Update inbox badge count (supervisors + admins)
+  updateInboxBadge();
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
