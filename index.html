@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-06-24-a -->
+<!-- v2026-06-24-b -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -180,6 +180,30 @@
     .payout-total { background: linear-gradient(135deg, #3730A3, #6D28D9); color: white; border-radius: 1.1rem; padding: 1.5rem 2rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 20px rgba(79,70,229,.3); }
     .payout-total-label { font-size: .88rem; opacity: .8; font-weight: 500; }
     .payout-total-amount { font-size: 2.4rem; font-weight: 800; letter-spacing: -1px; }
+
+    /* ── MoM PIVOT TABLE ── */
+    #mom-table-wrap .table-wrap { overflow-x: auto; overflow-y: visible; }
+    #mom-table-wrap table { border-collapse: collapse; min-width: 100%; }
+    #mom-table-wrap th, #mom-table-wrap td { white-space: nowrap; }
+    /* Sticky first two columns: Agent + Rippling ID */
+    #mom-table-wrap th:nth-child(1), #mom-table-wrap td:nth-child(1) {
+      position: sticky; left: 0; z-index: 4; background: #F8FAFC;
+      border-right: 2px solid #E2E8F0; min-width: 160px;
+    }
+    #mom-table-wrap th:nth-child(2), #mom-table-wrap td:nth-child(2) {
+      position: sticky; left: 162px; z-index: 4; background: #F8FAFC;
+      border-right: 1px solid #E2E8F0; min-width: 80px;
+    }
+    #mom-table-wrap thead th { position: sticky; top: 0; z-index: 5; background: #F8FAFC; }
+    #mom-table-wrap thead th:nth-child(1) { z-index: 6; }
+    #mom-table-wrap thead th:nth-child(2) { z-index: 6; }
+    .mom-month-cell { min-width: 130px; padding: .5rem .75rem; vertical-align: top; }
+    .mom-month-cell.paid-cell { opacity: .65; }
+    .mom-month-cell .mc-reviews { font-weight: 700; font-size: .88rem; }
+    .mom-month-cell .mc-bonus   { color: #10B981; font-weight: 700; font-size: .95rem; }
+    .mom-month-cell .mc-tier    { font-size: .68rem; color: #6366F1; margin-top: .1rem; }
+    .mom-month-cell .mc-status  { font-size: .7rem; margin-top: .25rem; }
+    .mom-total-cell { background: #F0FDF4; font-weight: 700; border-left: 2px solid #BBF7D0; }
 
     /* ── ADMIN PANEL ── */
     .roles-table { width: 100%; font-size: .875rem; }
@@ -2986,76 +3010,157 @@ function renderMoMTable(rows) {
   wrap.style.display  = '';
   empty.style.display = 'none';
 
-  // Sort by month descending (newest first)
-  const sorted = [...rows].sort((a, b) => {
-    const ma = (a.month || ''); const mb = (b.month || '');
-    return mb.localeCompare(ma);
+  // ── Build pivot: agent → month → data ───────────────────────────────────────
+  const agentMap = {};   // agentEmail → { agentName, ripplingId, months: { YYYY-MM: row } }
+  const monthSet = new Set();
+
+  rows.forEach(p => {
+    const ae = (p.agentEmail || '').toLowerCase();
+    const m  = (p.month || '').substring(0, 7);
+    if (!ae || !m) return;
+    monthSet.add(m);
+    if (!agentMap[ae]) agentMap[ae] = { agentEmail: ae, agentName: p.agentName || ae, ripplingId: p.ripplingId || '', months: {} };
+    agentMap[ae].months[m] = p;
   });
 
-  document.getElementById('mom-body').innerHTML = sorted.map(p => {
-    const isPaid   = p.paidStatus === 'Paid';
-    const badgeCss = isPaid ? 'background:#D1FAE5;color:#065F46' : 'background:#FEF3C7;color:#92400E';
-    return `
-    <tr style="${isPaid ? 'opacity:.8' : ''}">
-      <td><strong>${escHtml(p.month || '—')}</strong></td>
-      <td>
-        <div style="font-weight:600">${escHtml(p.agentName)}</div>
-        <div style="font-size:.75rem;color:#94A3B8">${escHtml(p.agentEmail)}</div>
+  // Months sorted newest → oldest (columns)
+  const months = [...monthSet].sort().reverse();
+
+  // Agents sorted by total bonus descending
+  const agents = Object.values(agentMap).sort((a, b) => {
+    const ta = Object.values(a.months).reduce((s, r) => s + Number(r.total || 0), 0);
+    const tb = Object.values(b.months).reduce((s, r) => s + Number(r.total || 0), 0);
+    return tb - ta;
+  });
+
+  // ── Header ───────────────────────────────────────────────────────────────────
+  const headerCols = months.map(m =>
+    `<th class="mom-month-cell" style="text-align:center">${formatMonthLabel(m)}</th>`
+  ).join('');
+  const tableHead = `<thead><tr>
+    <th style="min-width:175px">Agent</th>
+    <th style="min-width:80px">Rippling</th>
+    ${headerCols}
+    <th class="mom-total-cell" style="text-align:center">Total</th>
+  </tr></thead>`;
+
+  // ── Rows ─────────────────────────────────────────────────────────────────────
+  const tableBody = agents.map(a => {
+    let agentTotal = 0;
+    const monthCols = months.map(m => {
+      const p = a.months[m];
+      if (!p) return `<td class="mom-month-cell" style="text-align:center;color:#CBD5E1">—</td>`;
+      const isPaid = p.paidStatus === 'Paid';
+      agentTotal += Number(p.total || 0);
+      const statusDot = isPaid
+        ? `<span class="mc-status" style="color:#10B981">✅ Paid</span>`
+        : `<span class="mc-status" style="color:#F59E0B">⏳ Unpaid</span>`;
+      return `<td class="mom-month-cell ${isPaid ? 'paid-cell' : ''}" style="text-align:center">
+        <div class="mc-reviews">${p.count} review${p.count !== 1 ? 's' : ''}</div>
+        <div class="mc-bonus">$${p.total}</div>
+        <div class="mc-tier">${escHtml(p.tier)}</div>
+        ${statusDot}
+      </td>`;
+    }).join('');
+
+    return `<tr>
+      <td style="padding:.6rem .75rem">
+        <div style="font-weight:600;font-size:.88rem">${escHtml(a.agentName)}</div>
+        <div style="font-size:.72rem;color:#94A3B8">${escHtml(a.agentEmail)}</div>
       </td>
-      <td>${p.ripplingId ? `<code style="font-size:.75rem;background:#EFF6FF;color:#1D4ED8;padding:.15rem .35rem;border-radius:.3rem">${escHtml(p.ripplingId)}</code>` : '—'}</td>
-      <td>${p.count}</td>
-      <td><span class="badge" style="background:#EEF2FF;color:#4F46E5;font-size:.72rem">${escHtml(p.tier)}</span></td>
-      <td><strong style="color:#10B981">$${p.total}</strong></td>
-      <td><span class="badge" style="${badgeCss}">${isPaid ? '✅ Paid' : '⏳ Unpaid'}</span></td>
-      <td style="font-size:.8rem;color:#64748B">${p.paidDate ? formatDate(p.paidDate) : '—'}</td>
-      <td style="font-size:.8rem;color:#94A3B8">${escHtml(p.paidBy || '—')}</td>
+      <td style="padding:.6rem .75rem">
+        ${a.ripplingId
+          ? `<code style="font-size:.75rem;background:#EFF6FF;color:#1D4ED8;padding:.15rem .35rem;border-radius:.3rem">${escHtml(a.ripplingId)}</code>`
+          : `<span style="color:#CBD5E1">—</span>`}
+      </td>
+      ${monthCols}
+      <td class="mom-total-cell" style="text-align:center;padding:.6rem .75rem">
+        <div style="font-size:1rem;color:#10B981;font-weight:800">$${agentTotal}</div>
+        <div style="font-size:.7rem;color:#6B7280">${Object.keys(a.months).length} month${Object.keys(a.months).length !== 1 ? 's' : ''}</div>
+      </td>
     </tr>`;
   }).join('');
+
+  // ── Column totals row ─────────────────────────────────────────────────────────
+  const grandTotal = agents.reduce((s, a) =>
+    s + Object.values(a.months).reduce((ss, p) => ss + Number(p.total || 0), 0), 0);
+  const monthTotalCols = months.map(m => {
+    const t = rows.filter(r => (r.month||'').substring(0,7) === m).reduce((s,r) => s + Number(r.total||0), 0);
+    const n = rows.filter(r => (r.month||'').substring(0,7) === m).length;
+    return `<td class="mom-month-cell" style="text-align:center;background:#F8FAFC;font-weight:700;border-top:2px solid #E2E8F0">
+      <div style="color:#1E1B4B">$${t}</div>
+      <div style="font-size:.7rem;color:#94A3B8">${n} agent${n !== 1 ? 's' : ''}</div>
+    </td>`;
+  }).join('');
+
+  const tbody = document.getElementById('mom-body');
+  const table = tbody.closest('table');
+  table.querySelector('thead').outerHTML = tableHead;
+  tbody.innerHTML = tableBody + `
+    <tr style="font-size:.82rem">
+      <td style="padding:.6rem .75rem;font-weight:700;color:#374151;border-top:2px solid #E2E8F0">TOTAL</td>
+      <td style="border-top:2px solid #E2E8F0"></td>
+      ${monthTotalCols}
+      <td class="mom-total-cell" style="text-align:center;padding:.6rem .75rem;border-top:2px solid #E2E8F0">
+        <div style="font-size:1rem;color:#10B981;font-weight:800">$${grandTotal}</div>
+      </td>
+    </tr>`;
 }
 
 function renderPayoutSummary(rows) {
   const grid = document.getElementById('payout-summary-grid');
-  if (!rows.length) { grid.style.display = 'none'; return; }
+  if (!rows.length && !cachedData.length) { grid.style.display = 'none'; return; }
   grid.style.display = '';
 
-  const year        = new Date().getFullYear().toString();
-  const unpaidRows  = rows.filter(r => r.paidStatus !== 'Paid');
-  const outstanding = unpaidRows.reduce((s, r) => s + Number(r.total), 0);
-  const paidYTD     = rows.filter(r => r.paidStatus === 'Paid' && (r.month||'').startsWith(year)).reduce((s, r) => s + Number(r.total), 0);
-  const totalAll    = rows.reduce((s, r) => s + Number(r.total), 0);
-  const unpaidCount = unpaidRows.length;
-  const paidCount   = rows.filter(r => r.paidStatus === 'Paid' && (r.month||'').startsWith(year)).length;
+  const year = new Date().getFullYear().toString();
+
+  // ── Outstanding: use review-level paidStatus from cachedData (source of truth) ──
+  // The Payouts sheet (rows) can be stale if reviews were individually marked paid
+  // via the 💳 button without regenerating the monthly report. Reading from
+  // cachedData ensures this card always matches the Outstanding Unpaid Reviews panel.
+  const unpaidReviews = cachedData.filter(r =>
+    r.finalStatus === 'Valid' && (r.paidStatus || '').trim() !== 'Paid'
+  );
+  const outstanding = unpaidReviews.reduce((s, r) => s + Number(r.bonusRate || r.bonusAmount || 0), 0);
+  const unpaidCount = unpaidReviews.length;
+
+  // Per-month breakdown for the outstanding card (from review level, not Payouts sheet)
+  const byMonthReview = {};
+  unpaidReviews.forEach(r => {
+    const m = (r.month || r.submittedAt || '').substring(0, 7) || 'Unknown';
+    if (!byMonthReview[m]) byMonthReview[m] = { total: 0, count: 0 };
+    byMonthReview[m].total += Number(r.bonusRate || r.bonusAmount || 0);
+    byMonthReview[m].count += 1;
+  });
+
+  // ── Paid / Total: from Payouts sheet (official historical record) ──
+  const paidYTD  = rows.filter(r => r.paidStatus === 'Paid' && (r.month||'').startsWith(year)).reduce((s, r) => s + Number(r.total), 0);
+  const totalAll = rows.reduce((s, r) => s + Number(r.total), 0);
+  const paidCount = rows.filter(r => r.paidStatus === 'Paid' && (r.month||'').startsWith(year)).length;
 
   document.getElementById('payout-outstanding').textContent     = `$${outstanding}`;
-  document.getElementById('payout-outstanding-sub').textContent = `${unpaidCount} unpaid entr${unpaidCount !== 1 ? 'ies' : 'y'}`;
+  document.getElementById('payout-outstanding-sub').textContent = `${unpaidCount} unpaid review${unpaidCount !== 1 ? 's' : ''}`;
   document.getElementById('payout-paid-ytd').textContent        = `$${paidYTD}`;
   document.getElementById('payout-paid-ytd-sub').textContent    = `${paidCount} payment${paidCount !== 1 ? 's' : ''} confirmed`;
   document.getElementById('payout-total-ytd').textContent       = `$${totalAll}`;
   document.getElementById('payout-total-ytd-sub').textContent   = `across ${[...new Set(rows.map(r => r.month))].length} month${[...new Set(rows.map(r => r.month))].length !== 1 ? 's' : ''}`;
 
   // Per-month breakdown inside the outstanding card
-  const byMonth = {};
-  unpaidRows.forEach(r => {
-    const m = r.month || 'Unknown';
-    if (!byMonth[m]) byMonth[m] = { total: 0, count: 0 };
-    byMonth[m].total += Number(r.total || 0);
-    byMonth[m].count += 1;
-  });
-  const sortedMonths = Object.keys(byMonth).sort().reverse(); // most recent first
+  const sortedMonths = Object.keys(byMonthReview).sort().reverse(); // most recent first
   const breakdownEl  = document.getElementById('payout-outstanding-breakdown');
   if (breakdownEl) {
     if (!sortedMonths.length) {
       breakdownEl.innerHTML = '';
     } else {
       breakdownEl.innerHTML = sortedMonths.map(m => {
-        const d    = byMonth[m];
+        const d    = byMonthReview[m];
         const isCurrentSelected = m === (document.getElementById('payout-month')?.value || '');
         return `<div style="font-size:.72rem;display:flex;justify-content:space-between;gap:.75rem;
             padding:.1rem .3rem;border-radius:.3rem;
             background:${isCurrentSelected ? 'rgba(0,0,0,.07)' : 'transparent'};
             font-weight:${isCurrentSelected ? '700' : '400'}">
           <span>${formatMonthLabel(m)}${isCurrentSelected ? ' ←' : ''}</span>
-          <span style="color:#B45309">$${d.total} · ${d.count} agent${d.count !== 1 ? 's' : ''}</span>
+          <span style="color:#B45309">$${d.total} · ${d.count} review${d.count !== 1 ? 's' : ''}</span>
         </div>`;
       }).join('');
     }
