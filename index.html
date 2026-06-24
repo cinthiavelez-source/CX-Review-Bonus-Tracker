@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-05-27-y -->
+<!-- v2026-06-24-a -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -698,19 +698,20 @@
     <!-- MoM summary banners -->
     <div class="stats-grid" id="payout-summary-grid" style="display:none">
       <div class="stat-card amber">
-        <div class="stat-label">Outstanding (Unpaid)</div>
+        <div class="stat-label">Outstanding Unpaid · All Months</div>
         <div class="stat-value" id="payout-outstanding">$0</div>
-        <div class="stat-sub" id="payout-outstanding-sub">across all months</div>
+        <div class="stat-sub" id="payout-outstanding-sub">0 unpaid entries</div>
+        <div id="payout-outstanding-breakdown" style="margin-top:.45rem;display:flex;flex-direction:column;gap:.18rem"></div>
       </div>
       <div class="stat-card green">
         <div class="stat-label">Paid This Year</div>
         <div class="stat-value" id="payout-paid-ytd">$0</div>
-        <div class="stat-sub" id="payout-paid-ytd-sub">confirmed payments</div>
+        <div class="stat-sub" id="payout-paid-ytd-sub">0 payments confirmed</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Total Generated</div>
+        <div class="stat-label">Total Generated · All Months</div>
         <div class="stat-value" id="payout-total-ytd">$0</div>
-        <div class="stat-sub">all months combined</div>
+        <div class="stat-sub" id="payout-total-ytd-sub">all months combined</div>
       </div>
     </div>
 
@@ -732,16 +733,18 @@
         <div>
           <div class="payout-total-label">Total Bonus Payout</div>
           <div class="payout-total-amount" id="payout-grand-total">$0</div>
+          <div id="payout-prior-note" style="display:none;font-size:.78rem;opacity:.75;margin-top:.25rem"></div>
         </div>
         <div style="text-align:right">
           <div class="payout-total-label" id="payout-month-label"></div>
           <div style="font-size:.9rem;opacity:.8" id="payout-agent-count"></div>
+          <div id="payout-months-covered" style="display:none;font-size:.72rem;opacity:.65;margin-top:.2rem"></div>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>#</th><th>Agent</th><th>Rippling ID</th><th>Valid Reviews</th><th>Tier</th><th>Rate/Review</th><th>Total Bonus</th><th>Payment Status</th><th>Action</th>
+            <th>#</th><th>Agent</th><th>Rippling ID</th><th>Unpaid Reviews</th><th>Tier</th><th>Rate/Review</th><th>Total Bonus</th><th>Payment Status</th><th>Action</th>
           </tr></thead>
           <tbody id="payout-body"></tbody>
         </table>
@@ -2558,9 +2561,14 @@ async function generatePayout() {
   if (genBtn) { genBtn.textContent = '⏳ Generating…'; genBtn.disabled = true; }
   try {
     const data = await apiPost({ action: 'generatePayout', month });
-    renderPayoutTable(data.payouts, data.grandTotal, month);
-    showToast(`✅ Payout report generated for ${formatMonthLabel(month)}`, '#10B981');
-    logAudit('GENERATE_PAYOUT', `Generated payout report for ${formatMonthLabel(month)} — ${data.payouts?.length || 0} agents, total $${data.grandTotal || 0}`);
+    renderPayoutTable(data.payouts, data.grandTotal, month, {
+      priorTotal:    data.priorTotal    || 0,
+      totalReviews:  data.totalReviews  || 0,
+      monthsCovered: data.monthsCovered || [month]
+    });
+    const priorNote = data.priorTotal > 0 ? ` (incl. ${data.priorTotal} backlog review${data.priorTotal !== 1 ? 's' : ''} from prior months)` : '';
+    showToast(`✅ Payout report generated for ${formatMonthLabel(month)}${priorNote}`, '#10B981');
+    logAudit('GENERATE_PAYOUT', `Generated payout report for ${formatMonthLabel(month)} — ${data.payouts?.length || 0} agents, ${data.totalReviews || 0} reviews, total $${data.grandTotal || 0}${data.priorTotal ? `, ${data.priorTotal} from prior months` : ''}`);
     // Bust the MoM cache so the history table always reflects the just-generated data
     cachedAllPayouts   = [];
     cachedAllPayoutsAt = 0;
@@ -2604,17 +2612,21 @@ async function loadPayoutData() {
 // Normalizes payout rows from either backend format (raw sheet) or generated format
 function normalizePayoutRows(rows) {
   return rows.map(p => ({
-    month:      p.month       || '',
-    agentEmail: p.agentEmail  || '',
-    agentName:  p.agentName   || p.agentEmail || '',
-    ripplingId: p.ripplingId  || '',
-    count:      p.validReviewCount ?? p.count ?? 0,
-    tier:       p.bonusTier   || p.tier  || '',
-    rate:       p.ratePerReview ?? p.rate ?? 0,
-    total:      p.totalBonus  ?? p.total ?? 0,
-    paidStatus: p.paidStatus  || 'Unpaid',
-    paidDate:   p.paidDate    || '',
-    paidBy:     p.paidBy      || ''
+    month:          p.month          || '',
+    agentEmail:     p.agentEmail     || '',
+    agentName:      p.agentName      || p.agentEmail || '',
+    ripplingId:     p.ripplingId     || '',
+    count:          p.validReviewCount ?? p.count ?? 0,
+    tier:           p.bonusTier      || p.tier   || '',
+    rate:           p.ratePerReview  ?? p.rate   ?? 0,
+    total:          p.totalBonus     ?? p.total  ?? 0,
+    paidStatus:     p.paidStatus     || 'Unpaid',
+    paidDate:       p.paidDate       || '',
+    paidBy:         p.paidBy         || '',
+    // Cross-month fields — present only on freshly generated reports
+    monthBreakdown: p.monthBreakdown || null,  // { 'YYYY-MM': count }
+    priorCount:     p.priorCount     || 0,
+    currentCount:   p.currentCount   ?? (p.validReviewCount ?? p.count ?? 0)
   }));
 }
 
@@ -2663,7 +2675,7 @@ function filterPayoutTable() {
   renderPayoutRows(rows, total, cachedPayoutMonth);
 }
 
-function renderPayoutTable(rows, grandTotal, month) {
+function renderPayoutTable(rows, grandTotal, month, cycleInfo) {
   const normalized = normalizePayoutRows(rows);
   cachedPayoutRows  = normalized;
   cachedPayoutMonth = month;
@@ -2674,21 +2686,56 @@ function renderPayoutTable(rows, grandTotal, month) {
     document.getElementById('payout-body').innerHTML = '';
     const exportBtn = document.getElementById('payout-export-btn');
     if (exportBtn) exportBtn.style.display = 'none';
-    showToast('No valid reviews found for this month.', '#F59E0B');
+    showToast('No unpaid valid reviews found up to this month.', '#F59E0B');
     return;
   }
+
+  const cycle      = cycleInfo || {};
+  const priorTotal = cycle.priorTotal || 0;
+  const months     = cycle.monthsCovered || [month];
+  const totalRevs  = cycle.totalReviews  || normalized.reduce((s,p) => s + Number(p.count||p.validReviewCount||0), 0);
 
   document.getElementById('payout-empty').style.display        = 'none';
   document.getElementById('payout-total-banner').style.display = '';
   document.getElementById('payout-grand-total').textContent    = `$${grandTotal}`;
-  document.getElementById('payout-month-label').textContent    = formatMonthLabel(month);
-  document.getElementById('payout-agent-count').textContent    = `${normalized.length} agent${normalized.length !== 1 ? 's' : ''}`;
+
+  // Banner: "June 2026 Payroll Cycle" (if it covers multiple months, clarify)
+  const cycleLabel = months.length > 1
+    ? `${formatMonthLabel(month)} Payroll Cycle`
+    : formatMonthLabel(month);
+  document.getElementById('payout-month-label').textContent = cycleLabel;
+  document.getElementById('payout-agent-count').textContent =
+    `${normalized.length} agent${normalized.length !== 1 ? 's' : ''} · ${totalRevs} review${totalRevs !== 1 ? 's' : ''}`;
+
+  // Prior-month note under the dollar amount
+  const priorNoteEl = document.getElementById('payout-prior-note');
+  if (priorNoteEl) {
+    if (priorTotal > 0) {
+      priorNoteEl.textContent = `incl. ${priorTotal} unpaid review${priorTotal !== 1 ? 's' : ''} carried over from prior months`;
+      priorNoteEl.style.display = '';
+    } else {
+      priorNoteEl.style.display = 'none';
+    }
+  }
+
+  // Months covered (top-right, under agent count)
+  const monthsCovEl = document.getElementById('payout-months-covered');
+  if (monthsCovEl) {
+    if (months.length > 1) {
+      monthsCovEl.textContent = `covering: ${months.map(m => formatMonthLabel(m)).join(', ')}`;
+      monthsCovEl.style.display = '';
+    } else {
+      monthsCovEl.style.display = 'none';
+    }
+  }
 
   // Show the CSV export button now that we have data
   const exportBtn = document.getElementById('payout-export-btn');
   if (exportBtn) exportBtn.style.display = '';
 
   renderPayoutRows(normalized, grandTotal, month);
+  // Re-render summary cards so the month breakdown highlights the active month
+  if (cachedAllPayouts.length) renderPayoutSummary(cachedAllPayouts);
 }
 
 function renderPayoutRows(normalized, grandTotal, month) {
@@ -2712,7 +2759,17 @@ function renderPayoutRows(normalized, grandTotal, month) {
           ? `<code style="font-size:.78rem;background:#EFF6FF;color:#1D4ED8;padding:.15rem .4rem;border-radius:.3rem;font-weight:600">${escHtml(p.ripplingId)}</code>`
           : `<span style="color:#CBD5E1;font-size:.78rem">—</span>`}
       </td>
-      <td><strong>${p.count}</strong></td>
+      <td>
+        <strong>${p.count}</strong>
+        ${p.monthBreakdown && Object.keys(p.monthBreakdown).length > 1
+          ? '<div style="font-size:.68rem;color:#94A3B8;margin-top:.15rem">' +
+            Object.entries(p.monthBreakdown).sort().map(([m, c]) =>
+              `<span title="${formatMonthLabel(m)}">${m.slice(5)}: ${c}</span>`
+            ).join(' · ') + '</div>'
+          : (p.priorCount > 0
+            ? `<div style="font-size:.68rem;color:#F59E0B;margin-top:.15rem">${p.priorCount} from prior mo.</div>`
+            : '')}
+      </td>
       <td><span class="badge" style="background:#EEF2FF;color:#4F46E5">${escHtml(p.tier)}</span></td>
       <td>$${p.rate}/review</td>
       <td><strong style="color:#10B981;font-size:1.05rem">$${p.total}</strong></td>
@@ -2962,11 +3019,11 @@ function renderPayoutSummary(rows) {
   grid.style.display = '';
 
   const year        = new Date().getFullYear().toString();
-  const outstanding = rows.filter(r => r.paidStatus !== 'Paid').reduce((s, r) => s + Number(r.total), 0);
+  const unpaidRows  = rows.filter(r => r.paidStatus !== 'Paid');
+  const outstanding = unpaidRows.reduce((s, r) => s + Number(r.total), 0);
   const paidYTD     = rows.filter(r => r.paidStatus === 'Paid' && (r.month||'').startsWith(year)).reduce((s, r) => s + Number(r.total), 0);
   const totalAll    = rows.reduce((s, r) => s + Number(r.total), 0);
-
-  const unpaidCount = rows.filter(r => r.paidStatus !== 'Paid').length;
+  const unpaidCount = unpaidRows.length;
   const paidCount   = rows.filter(r => r.paidStatus === 'Paid' && (r.month||'').startsWith(year)).length;
 
   document.getElementById('payout-outstanding').textContent     = `$${outstanding}`;
@@ -2974,6 +3031,35 @@ function renderPayoutSummary(rows) {
   document.getElementById('payout-paid-ytd').textContent        = `$${paidYTD}`;
   document.getElementById('payout-paid-ytd-sub').textContent    = `${paidCount} payment${paidCount !== 1 ? 's' : ''} confirmed`;
   document.getElementById('payout-total-ytd').textContent       = `$${totalAll}`;
+  document.getElementById('payout-total-ytd-sub').textContent   = `across ${[...new Set(rows.map(r => r.month))].length} month${[...new Set(rows.map(r => r.month))].length !== 1 ? 's' : ''}`;
+
+  // Per-month breakdown inside the outstanding card
+  const byMonth = {};
+  unpaidRows.forEach(r => {
+    const m = r.month || 'Unknown';
+    if (!byMonth[m]) byMonth[m] = { total: 0, count: 0 };
+    byMonth[m].total += Number(r.total || 0);
+    byMonth[m].count += 1;
+  });
+  const sortedMonths = Object.keys(byMonth).sort().reverse(); // most recent first
+  const breakdownEl  = document.getElementById('payout-outstanding-breakdown');
+  if (breakdownEl) {
+    if (!sortedMonths.length) {
+      breakdownEl.innerHTML = '';
+    } else {
+      breakdownEl.innerHTML = sortedMonths.map(m => {
+        const d    = byMonth[m];
+        const isCurrentSelected = m === (document.getElementById('payout-month')?.value || '');
+        return `<div style="font-size:.72rem;display:flex;justify-content:space-between;gap:.75rem;
+            padding:.1rem .3rem;border-radius:.3rem;
+            background:${isCurrentSelected ? 'rgba(0,0,0,.07)' : 'transparent'};
+            font-weight:${isCurrentSelected ? '700' : '400'}">
+          <span>${formatMonthLabel(m)}${isCurrentSelected ? ' ←' : ''}</span>
+          <span style="color:#B45309">$${d.total} · ${d.count} agent${d.count !== 1 ? 's' : ''}</span>
+        </div>`;
+      }).join('');
+    }
+  }
 }
 
 // ── CSV EXPORT ────────────────────────────────────────────────────────────────
