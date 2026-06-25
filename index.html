@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-06-24-d -->
+<!-- v2026-06-24-e -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -54,6 +54,7 @@
     #page-allreviews col.c-sup    { width: 116px; }
     #page-allreviews col.c-status { width: 106px; }
     #page-allreviews col.c-reason { width: 110px; }
+    #page-allreviews col.c-paid   { width: 80px; }
     #page-allreviews col.c-act    { width: 126px; }
     /* Action menu */
     .ar-act-wrap { display: inline-flex; align-items: center; gap: .2rem; position: relative; }
@@ -677,7 +678,7 @@
         <table>
           <colgroup>
             <col class="c-code"><col class="c-date"><col class="c-ticket"><col class="c-plat"><col class="c-cust">
-            <col class="c-agent"><col class="c-sup"><col class="c-status"><col class="c-reason"><col class="c-act">
+            <col class="c-agent"><col class="c-sup"><col class="c-status"><col class="c-reason"><col class="c-paid"><col class="c-act">
           </colgroup>
           <thead><tr>
             <th>#</th>
@@ -689,6 +690,7 @@
             <th>Supervisor</th>
             <th>Status / Bonus</th>
             <th>Reason / Flag</th>
+            <th>Payment</th>
             <th>Actions</th>
           </tr></thead>
           <tbody id="allreviews-body"></tbody>
@@ -2343,6 +2345,13 @@ function renderAllReviews() {
       <td style="color:#0F766E" title="${escHtml(r.supervisorEmail||'')}">${escHtml(r.supervisorName||'—')}</td>
       <td>${statusBadge(r.finalStatus)}${r.finalStatus==='Valid'?`<span style="color:#10B981;font-weight:700;font-size:.76rem;margin-left:.25rem">$${r.bonusRate||0}</span>`:''}</td>
       <td title="${escHtml(reasonTxt||flagCode||'')}" style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${reasonDisplay}</td>
+      <td style="text-align:center">
+        ${r.finalStatus === 'Valid'
+          ? (r.paidStatus === 'Paid'
+              ? `<span title="Paid on ${r.paidDate||'?'} by ${r.paidBy||'?'}" style="font-size:.72rem;font-weight:700;color:#059669;background:#D1FAE5;border-radius:.4rem;padding:.15rem .4rem;white-space:nowrap">✅ Paid</span>`
+              : `<span style="font-size:.72rem;font-weight:700;color:#B45309;background:#FEF3C7;border-radius:.4rem;padding:.15rem .4rem;white-space:nowrap">⏳ Unpaid</span>`)
+          : `<span style="color:#9CA3AF;font-size:.8rem">—</span>`}
+      </td>
       <td style="overflow:visible">
         <div class="ar-act-wrap">
           ${primaryBtn}${rejectBtn}${payBtn}${moreMenu}
@@ -2877,7 +2886,7 @@ function exportAllReviewsCSV() {
   if (!rows.length || rows[0].querySelector('td[colspan]')) {
     showToast('No data to export.', '#F59E0B'); return;
   }
-  const headers = ['Code','Reg. Date','Review Date','Ticket','Platform','Customer','Agent','Agent Email','Supervisor','Status','Reason','Duplicate Flag','Bonus'];
+  const headers = ['Code','Reg. Date','Review Date','Ticket','Platform','Customer','Agent','Agent Email','Supervisor','Status','Reason','Duplicate Flag','Bonus','Payment Status','Paid Date','Paid By'];
   const data = cachedAllReviewsRows_.map(r => [
     r.reviewCode||'', r.registrationDate||r.submittedAt||'', r.reviewDate||'',
     r.ticketId||'', r.platform||'', r.customerName||'',
@@ -2885,7 +2894,10 @@ function exportAllReviewsCSV() {
     r.supervisorName||'', r.finalStatus||'',
     r.finalStatus!=='Valid' ? reasonText(r) : '',
     r.duplicateFlag||'',
-    r.finalStatus==='Valid' ? `$${r.bonusRate||0}` : ''
+    r.finalStatus==='Valid' ? `$${r.bonusRate||0}` : '',
+    r.finalStatus==='Valid' ? (r.paidStatus||'Unpaid') : '—',
+    r.paidDate||'',
+    r.paidBy||''
   ]);
   downloadCSV_(`CX_AllReviews_${new Date().toISOString().slice(0,10)}.csv`, headers, data);
 }
