@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- v2026-06-24-e -->
+<!-- v2026-06-24-g -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -507,16 +507,16 @@
   <div class="page" id="page-submit">
     <div class="page-title"><span>📝</span> Submit a Review</div>
 
-    <!-- Payroll lock banner — shown automatically on days 26–31 -->
+    <!-- Payroll lock banner — shown when admin has blocked submissions -->
     <div id="submit-lock-banner" style="display:none;background:linear-gradient(135deg,#FEF2F2,#FFF7ED);border:2px solid #FECACA;border-radius:1rem;padding:1.5rem 1.75rem;margin-bottom:1.25rem;text-align:center">
       <div style="font-size:2rem;margin-bottom:.5rem">🔒</div>
-      <div style="font-size:1.05rem;font-weight:800;color:#991B1B;margin-bottom:.5rem">Submissions closed for this month</div>
+      <div style="font-size:1.05rem;font-weight:800;color:#991B1B;margin-bottom:.5rem">Submissions are currently paused</div>
       <div style="font-size:.9rem;color:#7F1D1D;line-height:1.6;max-width:520px;margin:0 auto">
-        Review submissions are only accepted during the <strong>first 25 days of each month</strong>.<br>
-        We are currently running payroll — new submissions will count toward <strong>next month's bonus</strong>.
+        An admin has temporarily closed submissions while <strong>payroll is being processed</strong>.<br>
+        Your reviews will be accepted again once payroll closes and submissions reopen.
       </div>
       <div style="margin-top:1rem;font-size:.82rem;color:#B45309;background:#FFFBEB;border:1px solid #FDE68A;border-radius:.5rem;padding:.6rem 1rem;display:inline-block">
-        📅 Submissions reopen on the <strong>1st of next month</strong>
+        📬 Check back soon — an admin will reopen submissions when payroll is done
       </div>
     </div>
 
@@ -665,6 +665,9 @@
           <option value="Rejected">Rejected 🚫</option>
           <option value="Pending">Pending ⏳</option>
           <option value="Pending Review">👀 Pending Review</option>
+        </select>
+        <select id="ar-filter-month" onchange="renderAllReviews()">
+          <option value="">All Months</option>
         </select>
         <span class="filter-label" style="font-size:.78rem">From:</span>
         <input type="date" id="ar-from-date" onchange="renderAllReviews()" style="font-size:.82rem" />
@@ -836,6 +839,28 @@
   <!-- ── ADMIN ── -->
   <div class="page" id="page-admin">
     <div class="page-title"><span>⚙️</span> Admin Panel</div>
+
+    <!-- SUBMISSION LOCK CONTROL -->
+    <div class="card" id="submission-lock-card" style="border:2px solid #E2E8F0">
+      <div class="card-title" style="justify-content:space-between;flex-wrap:wrap;gap:.75rem">
+        <span>🔒 Submission Lock</span>
+        <span id="lock-status-badge" style="font-size:.8rem;font-weight:700;padding:.25rem .85rem;border-radius:9999px;background:#D1FAE5;color:#065F46">● Open</span>
+      </div>
+      <p style="font-size:.83rem;color:#64748B;margin-bottom:1.25rem;line-height:1.6">
+        Use this control at payroll time. <strong>Block submissions</strong> to freeze new entries while you run payroll — agents will see a paused banner. <strong>Open submissions</strong> again once payroll is processed. No date-based rules — you decide when to lock and unlock.
+      </p>
+      <div style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center">
+        <button id="btn-block-submissions" class="btn btn-sm" onclick="toggleSubmissionLock(true)"
+          style="background:#EF4444;color:white;font-weight:700;padding:.5rem 1.25rem;border-radius:.6rem;border:none;cursor:pointer;font-size:.85rem">
+          🔒 Block Submissions
+        </button>
+        <button id="btn-open-submissions" class="btn btn-sm" onclick="toggleSubmissionLock(false)"
+          style="background:#10B981;color:white;font-weight:700;padding:.5rem 1.25rem;border-radius:.6rem;border:none;cursor:pointer;font-size:.85rem">
+          ✅ Open Submissions
+        </button>
+        <span id="lock-note" style="font-size:.78rem;color:#94A3B8"></span>
+      </div>
+    </div>
 
     <!-- SUPERVISOR REVIEW QUEUE -->
     <div class="card" id="review-queue-card">
@@ -1063,7 +1088,7 @@ const DATA_CACHE_TTL = 24 * 60 * 60 * 1000;   // 24h — stale-while-revalidate;
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let cachedData              = [];   // all review records
-let cachedConfig            = { platforms: ['Google Reviews','Yelp','Trustpilot','App Store','Google Play'] };
+let cachedConfig            = { platforms: ['Google Reviews','Yelp','Trustpilot','App Store','Google Play'], submissionsLocked: false };
 let cachedRole              = 'agent';
 let cachedLeaderboard       = [];
 let cachedMyStats           = {};
@@ -1441,7 +1466,7 @@ function navTo(page) {
 
 // Returns true if today is day 26–31 (submission window is days 1–25 only)
 function isSubmissionLocked() {
-  return new Date().getDate() > 25;
+  return cachedConfig.submissionsLocked === true || cachedConfig.submissionsLocked === 'true';
 }
 
 // Show/hide the payroll lock banner on the Submit page
@@ -1453,6 +1478,40 @@ function applySubmissionLock() {
   if (formWrap) formWrap.style.display = locked ? 'none'  : 'block';
 }
 
+// Sync the lock status badge in the Admin panel
+function syncLockBadge() {
+  const locked = isSubmissionLocked();
+  const badge  = document.getElementById('lock-status-badge');
+  const note   = document.getElementById('lock-note');
+  if (badge) {
+    badge.textContent = locked ? '● Blocked' : '● Open';
+    badge.style.background = locked ? '#FEE2E2' : '#D1FAE5';
+    badge.style.color      = locked ? '#991B1B' : '#065F46';
+  }
+  if (note) {
+    note.textContent = locked
+      ? 'Agents see a paused banner and cannot submit.'
+      : 'Agents can submit reviews normally.';
+  }
+}
+
+// Toggle submission lock on/off (admin only)
+async function toggleSubmissionLock(lock) {
+  const note = document.getElementById('lock-note');
+  if (note) note.textContent = 'Saving…';
+  try {
+    const res = await apiPost({ action: 'toggleSubmissionLock', locked: lock });
+    if (res.error) { showToast('Error: ' + res.error, '#EF4444'); return; }
+    cachedConfig.submissionsLocked = res.submissionsLocked;
+    syncLockBadge();
+    applySubmissionLock();
+    showToast(lock ? '🔒 Submissions blocked.' : '✅ Submissions reopened.', lock ? '#EF4444' : '#10B981');
+  } catch (e) {
+    showToast('Failed to update lock state.', '#EF4444');
+    if (note) note.textContent = '';
+  }
+}
+
 function renderPage(page) {
   if (page === 'dashboard')   renderDashboard();
   if (page === 'reviews')     renderReviews();
@@ -1460,7 +1519,7 @@ function renderPage(page) {
   if (page === 'payout')      renderPayoutEmpty();
   if (page === 'submit')      applySubmissionLock();
   if (page === 'inbox')       renderInbox();
-  if (page === 'admin')       { loadReviewQueue(); loadHierarchy(); loadAuditLog(); }
+  if (page === 'admin')       { syncLockBadge(); loadReviewQueue(); loadHierarchy(); loadAuditLog(); }
   if (page === 'allreviews')  {
     renderAllReviews();
     if (!cachedAllPayouts.length) {
@@ -1921,7 +1980,7 @@ async function submitReview(e) {
   e.preventDefault();
   // Hard guard — double-check even if someone bypasses the UI
   if (isSubmissionLocked()) {
-    showToast('🔒 Submissions are closed during the last 5 days of the month. Payroll is running.', '#EF4444');
+    showToast('🔒 Submissions are currently paused by an admin. Please try again once payroll closes.', '#EF4444');
     return;
   }
   const u   = getUser();
@@ -2259,10 +2318,26 @@ function renderAllReviews() {
     });
   }
 
+  // Month filter — uses r.month (YYYY-MM) — same field as backend grouping/counting
+  const monthFilter = document.getElementById('ar-filter-month');
+  if (monthFilter && monthFilter.options.length <= 1) {
+    const months = [...new Set(cachedData.map(r => (r.month||'').substring(0,7)).filter(Boolean))].sort().reverse();
+    months.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      // Format as "May 2026" etc.
+      const [y, mo] = m.split('-');
+      const label = new Date(Number(y), Number(mo)-1, 1).toLocaleString('en-US', {month:'long', year:'numeric'});
+      opt.textContent = label;
+      monthFilter.appendChild(opt);
+    });
+  }
+
   const supVal   = document.getElementById('ar-filter-supervisor')?.value || '';
   const agentVal = isAgent ? myEmail : (document.getElementById('ar-filter-agent')?.value || '');
   const platVal  = document.getElementById('ar-filter-platform')?.value  || '';
   const statVal  = document.getElementById('ar-filter-status')?.value    || '';
+  const monthVal = document.getElementById('ar-filter-month')?.value     || '';
   const fromDate = document.getElementById('ar-from-date')?.value        || '';
   const toDate   = document.getElementById('ar-to-date')?.value          || '';
 
@@ -2276,6 +2351,7 @@ function renderAllReviews() {
   if (agentVal && !isAgent) rows = rows.filter(r => (r.agentEmail||'').toLowerCase() === agentVal);
   if (platVal)              rows = rows.filter(r => r.platform === platVal);
   if (statVal)              rows = rows.filter(r => r.finalStatus === statVal);
+  if (monthVal)             rows = rows.filter(r => (r.month||'').substring(0,7) === monthVal);
   if (fromDate || toDate)   rows = rows.filter(r => inDateRange(r, fromDate, toDate));
 
   const countEl = document.getElementById('ar-count');
@@ -2284,7 +2360,7 @@ function renderAllReviews() {
 
   const tbody = document.getElementById('allreviews-body');
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><div class="icon">📭</div><p>No reviews found for these filters.</p></div></td></tr>`;
     return;
   }
 
